@@ -10,7 +10,8 @@ export default async function handler(req, res) {
     const response = await fetch(SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ row, sheetId, tabName })
+      body: JSON.stringify({ row, sheetId, tabName }),
+      redirect: 'follow'
     });
 
     if (!response.ok) throw new Error('Script fout ' + response.status);
