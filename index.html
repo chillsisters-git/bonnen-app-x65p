@@ -288,24 +288,16 @@ function handleFile(input){
     previewSrc=e.target.result;
     var base64=e.target.result.split(',')[1];
     var mediaType=file.type||'image/jpeg';
-    fetch('https://api.anthropic.com/v1/messages',{
+    fetch('/api/scan',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',
-        max_tokens:1000,
-        messages:[{role:'user',content:[
-          {type:'image',source:{type:'base64',media_type:mediaType,data:base64}},
-          {type:'text',text:'Lees deze bon/factuur uit. Geef ALLEEN een JSON object terug, geen uitleg, geen markdown. Formaat: {"datum":"DD-MM-JJJJ","omschrijving":"korte omschrijving max 40 tekens","type":"Zakelijk of Prive of Inkomst","bedrag_incl":0.00,"btw_bedrag":0.00,"categorie":"een van: Software, Marketing, Opleidingen, Reiskosten, Telefoon en Internet, Kantoor, Bankkosten, Overige kosten, -","opmerking":"korte opmerking indien relevant, anders leeg"} Als er geen BTW is zet btw_bedrag op 0.'}
-        ]}]
-      })
+      body:JSON.stringify({image:base64,mediaType:mediaType})
     }).then(function(res){
       if(!res.ok) return res.text().then(function(t){throw new Error('API fout '+res.status+': '+t);});
       return res.json();
     }).then(function(data){
-      var text=(data.content||[]).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');
-      if(!text) throw new Error('Lege respons van API');
-      var parsed=JSON.parse(text.replace(/```json|```/g,'').trim());
+      if(!data.result) throw new Error('Lege respons van API');
+      var parsed=data.result;
       var rawType=(parsed.type||'').toLowerCase().replace('é','e');
       var type=rawType==='inkomst'?'Inkomst':(rawType==='prive'||rawType==='privé'?'Privé':'Zakelijk');
       var cats=['Software','Marketing','Opleidingen','Reiskosten','Telefoon en Internet','Kantoor','Bankkosten','Overige kosten','-'];
@@ -385,8 +377,8 @@ function saveBonSheets(){
 }
 
 function exportCSV(){
-  var rows=[['Datum','Omschrijving','Bedrag incl. BTW','BTW bedrag','Zakelijk/Priv\u00e9','Categorie','Betaald via','Bon aanwezig','Opmerking']];
-  bonnen.forEach(function(b,i){rows.push([b.datum,b.omschrijving,b.bedrag.toFixed(2),b.btw.toFixed(2),b.type,b.categorie||'',b.betaald||'','Ja',b.opmerking||'']);});
+  var rows=[['Datum','Omschrijving','Bedrag incl. BTW','BTW bedrag','Zakelijk/Privé','Categorie','Betaald via','Bon aanwezig','Opmerking']];
+  bonnen.forEach(function(b){rows.push([b.datum,b.omschrijving,b.bedrag.toFixed(2),b.btw.toFixed(2),b.type,b.categorie||'',b.betaald||'','Ja',b.opmerking||'']);});
   var csv=rows.map(function(r){return r.join(';');}).join('\n');
   var a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
