@@ -24,9 +24,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .stat-card{background:#fff;border-radius:10px;padding:14px}
 .stat-label{font-size:11px;color:#888;margin-bottom:4px}
 .stat-val{font-size:22px;font-weight:600}
+.jaar-tabs{display:flex;gap:6px;margin-bottom:8px}
+.jaar-tab{flex:1;text-align:center;font-size:13px;font-weight:600;padding:9px 4px;border-radius:10px;border:2px solid #ddd;background:#fff;cursor:pointer;color:#888}
+.jaar-tab.active{background:#1d1d1f;color:#fff;border-color:#1d1d1f}
+.jaar-tab.archief{border-style:dashed}
 .q-tabs{display:flex;gap:6px;margin-bottom:1rem;overflow-x:auto;padding-bottom:2px}
 .q-tab{flex:1;text-align:center;font-size:12px;font-weight:500;padding:7px 4px;border-radius:8px;border:1px solid #ddd;background:#fff;cursor:pointer;color:#888;white-space:nowrap;min-width:48px}
 .q-tab.active{background:#1D9E75;color:#fff;border-color:#1D9E75}
+.q-tab.disabled{opacity:0.35;cursor:default}
 .tabs{display:flex;border-bottom:1px solid #eee;margin-bottom:1rem}
 .tab{flex:1;text-align:center;font-size:12px;padding:8px 4px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;color:#888}
 .tab.active{color:#1D9E75;border-bottom-color:#1D9E75;font-weight:500}
@@ -68,7 +73,6 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
 .nav-btn{flex:1;padding:10px 4px 8px;background:none;border:none;cursor:pointer;font-size:10px;color:#888;display:flex;flex-direction:column;align-items:center;gap:3px}
 .nav-btn.active{color:#1D9E75}
 .nav-icon{font-size:20px;line-height:1}
-/* Bevestig dialoog */
 .confirm-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:100;align-items:center;justify-content:center}
 .confirm-overlay.show{display:flex}
 .confirm-box{background:#fff;border-radius:16px;padding:20px;margin:20px;max-width:320px;width:100%;text-align:center}
@@ -89,20 +93,18 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
   </div>
 
   <div id="screen-overzicht">
-    <div class="q-tabs">
-      <button class="q-tab active" id="qtab-alle" onclick="setKwartaal('alle')">Alles</button>
-      <button class="q-tab" id="qtab-Q1" onclick="setKwartaal('Q1')">Q1</button>
-      <button class="q-tab" id="qtab-Q2" onclick="setKwartaal('Q2')">Q2</button>
-      <button class="q-tab" id="qtab-Q3" onclick="setKwartaal('Q3')">Q3</button>
-      <button class="q-tab" id="qtab-Q4" onclick="setKwartaal('Q4')">Q4</button>
+    <div class="jaar-tabs">
+      <button class="jaar-tab archief" id="jaartab-2025" onclick="setJaar(2025)">2025 🗄</button>
+      <button class="jaar-tab active" id="jaartab-2026" onclick="setJaar(2026)">2026</button>
     </div>
+    <div class="q-tabs" id="q-tabs-bar"></div>
     <div class="grid2" id="stats-grid"></div>
     <div class="tabs">
       <button class="tab active" id="tab-bonnen" onclick="setTab('bonnen')">Bonnen</button>
       <button class="tab" id="tab-cat" onclick="setTab('cat')">Per categorie</button>
     </div>
     <div id="tab-content"></div>
-    <button class="btn-green" style="margin-top:1rem" onclick="setScreen('upload')">+ Nieuwe bon toevoegen</button>
+    <button class="btn-green" id="btn-nieuwe-bon" style="margin-top:1rem" onclick="setScreen('upload')">+ Nieuwe bon toevoegen</button>
   </div>
 
   <div id="screen-upload">
@@ -198,7 +200,6 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
   </div>
 </div>
 
-<!-- Bevestig verwijder dialoog -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
     <h3>Bon verwijderen?</h3>
@@ -223,19 +224,21 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
 </div>
 
 <script>
-var bonnen=[];
+var bonnen=(function(){try{var s=localStorage.getItem('bonnen');return s?JSON.parse(s):[];}catch(e){return [];}}());
 var activeTab='bonnen';
+var activeJaar=2026;
 var activeKwartaal='alle';
 var previewSrc=null;
 var sheetId=localStorage.getItem('sheetId')||'';
 var sheetTab=localStorage.getItem('sheetTab')||'Uitgavenoverzicht';
 var activeBTWpct=21;
 var btwHandmatigMode=false;
-var editId=null; // ID van bon die bewerkt wordt
-var verwijderId=null; // ID van bon die verwijderd wordt
+var editId=null;
+var verwijderId=null;
 
 function fmt(n){return '€ '+parseFloat(n||0).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function parseAmt(s){return parseFloat((s||'0').toString().replace(/[€\s]/g,'').replace(',','.'))||0;}
+function slaOpslaan(){try{localStorage.setItem('bonnen',JSON.stringify(bonnen));}catch(e){}}
 
 function getKwartaal(datum){
   if(!datum) return null;
@@ -248,17 +251,47 @@ function getKwartaal(datum){
   return 'Q4';
 }
 
+function getJaar(datum){
+  if(!datum) return null;
+  var parts=datum.split('-');
+  if(parts.length<3) return null;
+  return parseInt(parts[2],10);
+}
+
+function getKwartalen(){
+  return activeJaar===2025?['alle','Q4']:['alle','Q1','Q2','Q3','Q4'];
+}
+
+function renderQTabs(){
+  var kwartalen=getKwartalen();
+  var bar=document.getElementById('q-tabs-bar');
+  bar.innerHTML=kwartalen.map(function(q){
+    return '<button class="q-tab'+(activeKwartaal===q?' active':'')+(q==='alle'?'':'')+'" onclick="setKwartaal(\''+q+'\')">'+q+'</button>';
+  }).join('');
+}
+
 function gefilterdeBonnen(){
-  if(activeKwartaal==='alle') return bonnen;
-  return bonnen.filter(function(b){return getKwartaal(b.datum)===activeKwartaal;});
+  return bonnen.filter(function(b){
+    if(getJaar(b.datum)!==activeJaar) return false;
+    if(activeKwartaal==='alle') return true;
+    return getKwartaal(b.datum)===activeKwartaal;
+  });
+}
+
+function setJaar(j){
+  activeJaar=j;
+  activeKwartaal='alle';
+  [2025,2026].forEach(function(y){
+    var el=document.getElementById('jaartab-'+y);
+    if(el) el.classList.toggle('active',y===j);
+  });
+  renderQTabs();
+  renderOverzicht();
 }
 
 function setKwartaal(q){
   activeKwartaal=q;
-  ['alle','Q1','Q2','Q3','Q4'].forEach(function(x){
-    var el=document.getElementById('qtab-'+x);
-    if(el) el.classList.toggle('active',x===q);
-  });
+  renderQTabs();
   renderOverzicht();
 }
 
@@ -280,10 +313,7 @@ function setScreen(s){
   }
 }
 
-function goBack(){
-  editId=null;
-  setScreen('overzicht');
-}
+function goBack(){editId=null;setScreen('overzicht');}
 
 function saveSheetSettings(){
   sheetId=document.getElementById('sheet-id-input').value.trim();
@@ -308,6 +338,11 @@ function badgeClass(type){
 }
 
 function renderOverzicht(){
+  renderQTabs();
+  [2025,2026].forEach(function(y){
+    var el=document.getElementById('jaartab-'+y);
+    if(el) el.classList.toggle('active',y===activeJaar);
+  });
   var lijst=gefilterdeBonnen();
   var totUitgaven=lijst.reduce(function(s,b){return s+b.bedrag;},0);
   var totBTW=lijst.reduce(function(s,b){return s+b.btw;},0);
@@ -324,7 +359,7 @@ function renderTab(){
   var el=document.getElementById('tab-content');
   var lijst=gefilterdeBonnen();
   if(activeTab==='bonnen'){
-    if(!lijst.length){el.innerHTML='<div class="empty">Geen bonnen'+(activeKwartaal!=='alle'?' in '+activeKwartaal:'')+' — voeg er een toe!</div>';return;}
+    if(!lijst.length){el.innerHTML='<div class="empty">Geen bonnen in '+activeJaar+(activeKwartaal!=='alle'?' '+activeKwartaal:'')+'</div>';return;}
     el.innerHTML=lijst.map(function(b){
       return '<div class="bon-row">'+
         '<div class="bon-info">'+
@@ -366,7 +401,6 @@ function renderTab(){
   }
 }
 
-// Bon bewerken
 function bewerkBon(id){
   var bon=bonnen.find(function(b){return b.id===id;});
   if(!bon) return;
@@ -390,17 +424,15 @@ function bewerkBon(id){
   document.getElementById('f-opmerking').value=bon.opmerking||'';
   document.getElementById('btn-save-sheets').style.display='none';
   document.getElementById('btn-verwijder').style.display='flex';
-  // BTW pct detecteren
   btwHandmatigMode=true;
   [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
 }
 
-// Verwijder bevestiging
 function vraagVerwijder(id){
   var bon=bonnen.find(function(b){return b.id===id;});
   if(!bon) return;
   verwijderId=id;
-  document.getElementById('confirm-txt').textContent='Verwijder "'+( bon.omschrijving||'deze bon')+'"?';
+  document.getElementById('confirm-txt').textContent='Verwijder "'+(bon.omschrijving||'deze bon')+'"?';
   document.getElementById('confirm-overlay').classList.add('show');
 }
 
@@ -412,19 +444,15 @@ function sluitConfirm(){
 function bevestigVerwijder(){
   if(verwijderId){
     bonnen=bonnen.filter(function(b){return b.id!==verwijderId;});
+    slaOpslaan();
     verwijderId=null;
   }
   document.getElementById('confirm-overlay').classList.remove('show');
-  renderOverzicht();
+  if(editId){editId=null;setScreen('overzicht');}else{renderOverzicht();}
 }
 
-function verwijderBon(){
-  if(editId){
-    vraagVerwijder(editId);
-  }
-}
+function verwijderBon(){if(editId){vraagVerwijder(editId);}}
 
-// BTW knoppen
 function setBTWpct(pct){
   activeBTWpct=pct;
   btwHandmatigMode=false;
@@ -527,6 +555,7 @@ function saveBon(){
   } else {
     bonnen.unshift(bon);
   }
+  slaOpslaan();
   setScreen('overzicht');
 }
 
@@ -539,6 +568,7 @@ function saveBonSheets(){
   } else {
     bonnen.unshift(bon);
   }
+  slaOpslaan();
   var btn=document.getElementById('btn-save-sheets');
   btn.textContent='⏳ Bezig...';
   btn.disabled=true;
@@ -563,12 +593,12 @@ function saveBonSheets(){
 
 function exportCSV(){
   var lijst=gefilterdeBonnen();
-  var rows=[['Datum','Omschrijving','Bedrag incl. BTW','BTW bedrag','Zakelijk/Priv\u00e9','Categorie','Betaald via','Bon aanwezig','Opmerking']];
+  var rows=[['Datum','Omschrijving','Bedrag incl. BTW','BTW bedrag','Zakelijk/Privé','Categorie','Betaald via','Bon aanwezig','Opmerking']];
   lijst.forEach(function(b){rows.push([b.datum,b.omschrijving,b.bedrag.toFixed(2),b.btw.toFixed(2),b.type,b.categorie||'',b.betaald||'','Ja',b.opmerking||'']);});
   var csv=rows.map(function(r){return r.join(';');}).join('\n');
   var a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download='bonnen'+(activeKwartaal!=='alle'?'-'+activeKwartaal:'')+'.csv';
+  a.download='bonnen-'+activeJaar+(activeKwartaal!=='alle'?'-'+activeKwartaal:'')+'.csv';
   a.click();
 }
 
@@ -585,3 +615,4 @@ setScreen('overzicht');
 </script>
 </body>
 </html>
+```
