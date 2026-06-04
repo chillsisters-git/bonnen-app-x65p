@@ -24,14 +24,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .stat-card{background:#fff;border-radius:10px;padding:14px}
 .stat-label{font-size:11px;color:#888;margin-bottom:4px}
 .stat-val{font-size:22px;font-weight:600}
-.jaar-tabs{display:flex;gap:6px;margin-bottom:8px}
-.jaar-tab{flex:1;text-align:center;font-size:13px;font-weight:600;padding:9px 4px;border-radius:10px;border:2px solid #ddd;background:#fff;cursor:pointer;color:#888}
-.jaar-tab.active{background:#1d1d1f;color:#fff;border-color:#1d1d1f}
-.jaar-tab.archief{border-style:dashed}
 .q-tabs{display:flex;gap:6px;margin-bottom:1rem;overflow-x:auto;padding-bottom:2px}
 .q-tab{flex:1;text-align:center;font-size:12px;font-weight:500;padding:7px 4px;border-radius:8px;border:1px solid #ddd;background:#fff;cursor:pointer;color:#888;white-space:nowrap;min-width:48px}
 .q-tab.active{background:#1D9E75;color:#fff;border-color:#1D9E75}
-.q-tab.disabled{opacity:0.35;cursor:default}
 .tabs{display:flex;border-bottom:1px solid #eee;margin-bottom:1rem}
 .tab{flex:1;text-align:center;font-size:12px;padding:8px 4px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;color:#888}
 .tab.active{color:#1D9E75;border-bottom-color:#1D9E75;font-weight:500}
@@ -68,12 +63,14 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
 .section-title{font-size:12px;font-weight:500;color:#888;margin:16px 0 6px;text-transform:uppercase;letter-spacing:.5px}
 .sheets-setup{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px}
 .sheets-setup p{font-size:13px;color:#555;margin-bottom:10px}
+.rekening-lijst{font-size:12px;color:#555;line-height:2}
+.rekening-rij{display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f5f5f5}
+.rekening-nr{font-family:monospace;font-size:13px;font-weight:600;color:#1D9E75}
 #screen-overzicht,#screen-upload,#screen-controleer,#screen-instellingen{display:none}
 .nav-bar{display:flex;background:#fff;border-top:1px solid #eee;position:fixed;bottom:0;left:0;right:0;z-index:10}
 .nav-btn{flex:1;padding:10px 4px 8px;background:none;border:none;cursor:pointer;font-size:10px;color:#888;display:flex;flex-direction:column;align-items:center;gap:3px}
 .nav-btn.active{color:#1D9E75}
 .nav-icon{font-size:20px;line-height:1}
-/* Bevestig dialoog */
 .confirm-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:100;align-items:center;justify-content:center}
 .confirm-overlay.show{display:flex}
 .confirm-box{background:#fff;border-radius:16px;padding:20px;margin:20px;max-width:320px;width:100%;text-align:center}
@@ -94,18 +91,20 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
   </div>
 
   <div id="screen-overzicht">
-    <div class="jaar-tabs">
-      <button class="jaar-tab archief" id="jaartab-2025" onclick="setJaar(2025)">2025 🗄</button>
-      <button class="jaar-tab active" id="jaartab-2026" onclick="setJaar(2026)">2026</button>
+    <div class="q-tabs">
+      <button class="q-tab active" id="qtab-alle" onclick="setKwartaal('alle')">Alles</button>
+      <button class="q-tab" id="qtab-Q1" onclick="setKwartaal('Q1')">Q1</button>
+      <button class="q-tab" id="qtab-Q2" onclick="setKwartaal('Q2')">Q2</button>
+      <button class="q-tab" id="qtab-Q3" onclick="setKwartaal('Q3')">Q3</button>
+      <button class="q-tab" id="qtab-Q4" onclick="setKwartaal('Q4')">Q4</button>
     </div>
-    <div class="q-tabs" id="q-tabs-bar"></div>
     <div class="grid2" id="stats-grid"></div>
     <div class="tabs">
       <button class="tab active" id="tab-bonnen" onclick="setTab('bonnen')">Bonnen</button>
       <button class="tab" id="tab-cat" onclick="setTab('cat')">Per categorie</button>
     </div>
     <div id="tab-content"></div>
-    <button class="btn-green" id="btn-nieuwe-bon" style="margin-top:1rem" onclick="setScreen('upload')">+ Nieuwe bon toevoegen</button>
+    <button class="btn-green" style="margin-top:1rem" onclick="setScreen('upload')">+ Nieuwe bon toevoegen</button>
   </div>
 
   <div id="screen-upload">
@@ -117,7 +116,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
       <p>Of sleep een bon hierheen</p>
       <small>JPG, PNG of PDF</small>
     </div>
-    <div class="tip">💡 <span>AI leest datum, bedrag en BTW automatisch uit</span></div>
+    <div class="tip">💡 <span>AI leest datum, bedrag, BTW en betaalrekening automatisch uit</span></div>
   </div>
 
   <div id="screen-controleer">
@@ -148,15 +147,9 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
         <button class="btw-pct-btn" id="btw-0" onclick="setBTWpct(0)">0%</button>
         <button class="btw-pct-btn" id="btw-9" onclick="setBTWpct(9)">9%</button>
         <button class="btw-pct-btn active" id="btw-21" onclick="setBTWpct(21)">21%</button>
-        <input type="number" id="btw-anders" min="0" max="99" placeholder="%" oninput="setBTWanders(this.value)" style="width:56px;text-align:center;font-size:13px;padding:7px 4px;border-radius:8px;border:1px solid #ddd;background:#fafafa">
       </div>
       <label>BTW bedrag (€)</label>
       <input type="text" id="f-btw" oninput="btwHandmatig()">
-      <div style="margin-top:8px">
-        <label style="display:flex;align-items:center;gap:8px;margin-top:0;font-size:13px;color:#555;cursor:pointer">
-          <input type="checkbox" id="f-buitenland" style="width:auto;margin:0"> Buitenlandse bon
-        </label>
-      </div>
       <label>Categorie</label>
       <select id="f-categorie">
         <option>Software</option>
@@ -169,16 +162,18 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
         <option>Overige kosten</option>
         <option>-</option>
       </select>
+
       <label>Betaald via</label>
-      <select id="f-betaald">
-        <option>ABN zakelijk</option>
-        <option>ABN prive</option>
-        <option>Bunq zakelijk</option>
-        <option>Bunq prive</option>
-        <option>Revolut</option>
-        <option>Contant</option>
-        <option>Overig</option>
+      <select id="f-betaald" onchange="checkAndersVeld()">
+        <option value="BUNQ Zakelijk (7361)">BUNQ Zakelijk (7361)</option>
+        <option value="VISA (5749)">VISA (5749)</option>
+        <option value="BUNQ Privé (4183)">BUNQ Privé (4183)</option>
+        <option value="ABN Privé (4178)">ABN Privé (4178)</option>
+        <option value="Contant">Contant</option>
+        <option value="Anders">Anders, namelijk...</option>
       </select>
+      <input type="text" id="f-betaald-anders" placeholder="Bijv. creditcard zakelijk" style="display:none;margin-top:6px">
+
       <label>Opmerking</label>
       <input type="text" id="f-opmerking" placeholder="Optioneel">
       <button class="btn-green" style="margin-top:16px" onclick="saveBon()">✓ Opslaan</button>
@@ -188,6 +183,17 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
   </div>
 
   <div id="screen-instellingen">
+    <div class="section-title">Betaalrekeningen</div>
+    <div class="sheets-setup">
+      <p>De AI herkent automatisch welke rekening op de bon staat via de laatste 4 cijfers.</p>
+      <div class="rekening-lijst">
+        <div class="rekening-rij"><span>BUNQ Zakelijk</span><span class="rekening-nr">…7361</span></div>
+        <div class="rekening-rij"><span>VISA</span><span class="rekening-nr">…5749</span></div>
+        <div class="rekening-rij"><span>BUNQ Privé</span><span class="rekening-nr">…4183</span></div>
+        <div class="rekening-rij"><span>ABN Privé</span><span class="rekening-nr">…4178</span></div>
+        <div class="rekening-rij"><span>Contant</span><span style="font-size:12px;color:#aaa">geen nummer</span></div>
+      </div>
+    </div>
     <div class="section-title">Google Sheets koppeling</div>
     <div class="sheets-setup">
       <p>Plak hier de ID van je Google Sheet.</p>
@@ -207,7 +213,6 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
   </div>
 </div>
 
-<!-- Bevestig verwijder dialoog -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
     <h3>Bon verwijderen?</h3>
@@ -232,21 +237,51 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
 </div>
 
 <script>
-var bonnen=(function(){try{var s=localStorage.getItem('bonnen');return s?JSON.parse(s):[];}catch(e){return [];}}());
+var bonnen=[];
 var activeTab='bonnen';
-var activeJaar=2026;
 var activeKwartaal='alle';
 var previewSrc=null;
 var sheetId=localStorage.getItem('sheetId')||'';
 var sheetTab=localStorage.getItem('sheetTab')||'Uitgavenoverzicht';
 var activeBTWpct=21;
 var btwHandmatigMode=false;
-var editId=null; // ID van bon die bewerkt wordt
-var verwijderId=null; // ID van bon die verwijderd wordt
+var editId=null;
+var verwijderId=null;
+
+// Rekeningen mapping: laatste 4 cijfers → naam in dropdown
+var REKENINGEN=[
+  {cijfers:'7361',naam:'BUNQ Zakelijk (7361)'},
+  {cijfers:'5749',naam:'VISA (5749)'},
+  {cijfers:'4183',naam:'BUNQ Privé (4183)'},
+  {cijfers:'4178',naam:'ABN Privé (4178)'},
+  {cijfers:'contant',naam:'Contant'}
+];
 
 function fmt(n){return '€ '+parseFloat(n||0).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function parseAmt(s){return parseFloat((s||'0').toString().replace(/[€\s]/g,'').replace(',','.'))||0;}
-function slaOpslaan(){try{localStorage.setItem('bonnen',JSON.stringify(bonnen));}catch(e){}}
+
+function matchRekening(gevonden){
+  if(!gevonden) return null;
+  var s=gevonden.toString().replace(/\s/g,'');
+  for(var i=0;i<REKENINGEN.length;i++){
+    if(s.indexOf(REKENINGEN[i].cijfers)>=0) return REKENINGEN[i].naam;
+  }
+  return null;
+}
+
+function checkAndersVeld(){
+  var v=document.getElementById('f-betaald').value;
+  document.getElementById('f-betaald-anders').style.display=(v==='Anders')?'block':'none';
+}
+
+function getBetaaldWaarde(){
+  var v=document.getElementById('f-betaald').value;
+  if(v==='Anders'){
+    var a=document.getElementById('f-betaald-anders').value.trim();
+    return a||'Anders';
+  }
+  return v;
+}
 
 function getKwartaal(datum){
   if(!datum) return null;
@@ -259,48 +294,17 @@ function getKwartaal(datum){
   return 'Q4';
 }
 
-function getJaar(datum){
-  if(!datum) return null;
-  var parts=datum.split('-');
-  if(parts.length<3) return null;
-  return parseInt(parts[2],10);
-}
-
-function getKwartalen(){
-  return activeJaar===2025?['alle','Q4']:['alle','Q1','Q2','Q3','Q4'];
-}
-
-function renderQTabs(){
-  var kwartalen=getKwartalen();
-  var bar=document.getElementById('q-tabs-bar');
-  bar.innerHTML=kwartalen.map(function(q){
-    return '<button class="q-tab'+(activeKwartaal===q?' active':'')+'" onclick="setKwartaal(\'' +q+ '\')">'+q+'</button>';
-  }).join('');
-}
-
 function gefilterdeBonnen(){
-  return bonnen.filter(function(b){
-    if(getJaar(b.datum)!==activeJaar) return false;
-    if(activeKwartaal==='alle') return true;
-    return getKwartaal(b.datum)===activeKwartaal;
-  });
-}
-
-function setJaar(j){
-  activeJaar=j;
-  activeKwartaal='alle';
-  [2025,2026].forEach(function(y){
-    var el=document.getElementById('jaartab-'+y);
-    if(el) el.classList.toggle('active',y===j);
-  });
-
-  renderQTabs();
-  renderOverzicht();
+  if(activeKwartaal==='alle') return bonnen;
+  return bonnen.filter(function(b){return getKwartaal(b.datum)===activeKwartaal;});
 }
 
 function setKwartaal(q){
   activeKwartaal=q;
-  renderQTabs();
+  ['alle','Q1','Q2','Q3','Q4'].forEach(function(x){
+    var el=document.getElementById('qtab-'+x);
+    if(el) el.classList.toggle('active',x===q);
+  });
   renderOverzicht();
 }
 
@@ -322,10 +326,7 @@ function setScreen(s){
   }
 }
 
-function goBack(){
-  editId=null;
-  setScreen('overzicht');
-}
+function goBack(){editId=null;setScreen('overzicht');}
 
 function saveSheetSettings(){
   sheetId=document.getElementById('sheet-id-input').value.trim();
@@ -350,13 +351,6 @@ function badgeClass(type){
 }
 
 function renderOverzicht(){
-  renderQTabs();
-
-  // jaar tab highlight
-  [2025,2026].forEach(function(y){
-    var el=document.getElementById('jaartab-'+y);
-    if(el) el.classList.toggle('active',y===activeJaar);
-  });
   var lijst=gefilterdeBonnen();
   var totUitgaven=lijst.reduce(function(s,b){return s+b.bedrag;},0);
   var totBTW=lijst.reduce(function(s,b){return s+b.btw;},0);
@@ -373,12 +367,12 @@ function renderTab(){
   var el=document.getElementById('tab-content');
   var lijst=gefilterdeBonnen();
   if(activeTab==='bonnen'){
-    if(!lijst.length){el.innerHTML='<div class="empty">Geen bonnen'+(activeKwartaal!=='alle'?' in '+activeKwartaal+' '+activeJaar:' in '+activeJaar)+(activeJaar===2026?' — voeg er een toe!':'')+'</div>';return;}
+    if(!lijst.length){el.innerHTML='<div class="empty">Geen bonnen'+(activeKwartaal!=='alle'?' in '+activeKwartaal:'')+' — voeg er een toe!</div>';return;}
     el.innerHTML=lijst.map(function(b){
       return '<div class="bon-row">'+
         '<div class="bon-info">'+
           '<div class="bon-name">'+(b.omschrijving||'—')+'</div>'+
-          '<div class="bon-meta">'+b.datum+' · <span class="badge '+badgeClass(b.type)+'">'+b.type+'</span> · '+(b.categorie||'')+(b.buitenland?' · 🌍':'')+'</div>'+
+          '<div class="bon-meta">'+b.datum+' · <span class="badge '+badgeClass(b.type)+'">'+b.type+'</span> · '+(b.categorie||'')+'</div>'+
         '</div>'+
         '<div style="display:flex;align-items:center;gap:8px;margin-left:8px">'+
           '<div style="text-align:right"><div class="bon-amt">'+fmt(b.bedrag)+'</div>'+(b.btw>0?'<div class="bon-btw">BTW '+fmt(b.btw)+'</div>':'')+'</div>'+
@@ -415,7 +409,6 @@ function renderTab(){
   }
 }
 
-// Bon bewerken
 function bewerkBon(id){
   var bon=bonnen.find(function(b){return b.id===id;});
   if(!bon) return;
@@ -435,67 +428,49 @@ function bewerkBon(id){
   document.getElementById('f-bedrag').value=bon.bedrag.toFixed(2);
   document.getElementById('f-btw').value=bon.btw.toFixed(2);
   document.getElementById('f-categorie').value=bon.categorie||'Overige kosten';
-  document.getElementById('f-betaald').value=bon.betaald||'ABN zakelijk';
+  setBetaaldVeld(bon.betaald||'BUNQ Zakelijk (7361)');
   document.getElementById('f-opmerking').value=bon.opmerking||'';
   document.getElementById('btn-save-sheets').style.display='none';
   document.getElementById('btn-verwijder').style.display='flex';
-  document.getElementById('f-buitenland').checked=bon.buitenland||false;
-  document.getElementById('btw-anders').value='';
-  btwHandmatigMode=false;
-  activeBTWpct=bon.btwpct!==undefined?bon.btwpct:21;
-  if([0,9,21].indexOf(activeBTWpct)>=0){
-    [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.toggle('active',p===activeBTWpct);});
+  btwHandmatigMode=true;
+  [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
+}
+
+function setBetaaldVeld(waarde){
+  var sel=document.getElementById('f-betaald');
+  var opties=['BUNQ Zakelijk (7361)','VISA (5749)','BUNQ Privé (4183)','ABN Privé (4178)','Contant','Anders'];
+  if(opties.indexOf(waarde)>=0){
+    sel.value=waarde;
+    document.getElementById('f-betaald-anders').style.display='none';
   } else {
-    [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
-    document.getElementById('btw-anders').value=activeBTWpct;
+    sel.value='Anders';
+    document.getElementById('f-betaald-anders').style.display='block';
+    document.getElementById('f-betaald-anders').value=waarde;
   }
 }
 
-// Verwijder bevestiging
 function vraagVerwijder(id){
   var bon=bonnen.find(function(b){return b.id===id;});
   if(!bon) return;
   verwijderId=id;
-  document.getElementById('confirm-txt').textContent='Verwijder "'+( bon.omschrijving||'deze bon')+'"?';
+  document.getElementById('confirm-txt').textContent='Verwijder "'+(bon.omschrijving||'deze bon')+'"?';
   document.getElementById('confirm-overlay').classList.add('show');
 }
 
-function sluitConfirm(){
-  document.getElementById('confirm-overlay').classList.remove('show');
-  verwijderId=null;
-}
+function sluitConfirm(){document.getElementById('confirm-overlay').classList.remove('show');verwijderId=null;}
 
 function bevestigVerwijder(){
-  if(verwijderId){
-    bonnen=bonnen.filter(function(b){return b.id!==verwijderId;});
-    slaOpslaan();
-    verwijderId=null;
-  }
+  if(verwijderId){bonnen=bonnen.filter(function(b){return b.id!==verwijderId;});verwijderId=null;}
   document.getElementById('confirm-overlay').classList.remove('show');
   if(editId){editId=null;setScreen('overzicht');}else{renderOverzicht();}
 }
 
-function verwijderBon(){
-  if(editId){
-    vraagVerwijder(editId);
-  }
-}
+function verwijderBon(){if(editId) vraagVerwijder(editId);}
 
-// BTW knoppen
 function setBTWpct(pct){
   activeBTWpct=pct;
   btwHandmatigMode=false;
   [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.toggle('active',p===pct);});
-  document.getElementById('btw-anders').value='';
-  herbereken();
-}
-
-function setBTWanders(val){
-  var pct=parseFloat(val);
-  if(isNaN(pct)||val==='') return;
-  activeBTWpct=pct;
-  btwHandmatigMode=false;
-  [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
   herbereken();
 }
 
@@ -509,7 +484,6 @@ function herbereken(){
 function btwHandmatig(){
   btwHandmatigMode=true;
   [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
-  document.getElementById('btw-anders').value='';
 }
 
 function handleFile(input){
@@ -539,9 +513,11 @@ function handleFile(input){
       var btw=parsed.btw_bedrag||0;
       var pct=21;
       if(bedrag>0){var calc=Math.round((btw/bedrag)*100*100)/100;if(calc<1)pct=0;else if(calc<12)pct=9;else pct=21;}
-      showForm({datum:parsed.datum||'',omschrijving:parsed.omschrijving||'',type:'Zakelijk',bedrag:bedrag.toFixed(2),btw:btw.toFixed(2),categorie:cat,opmerking:parsed.opmerking||''},pct,null,true);
+      // Rekening matchen
+      var betaald=matchRekening(parsed.rekening_cijfers)||'BUNQ Zakelijk (7361)';
+      showForm({datum:parsed.datum||'',omschrijving:parsed.omschrijving||'',type:'Zakelijk',bedrag:bedrag.toFixed(2),btw:btw.toFixed(2),categorie:cat,betaald:betaald,opmerking:parsed.opmerking||''},pct,null,true);
     }).catch(function(e){
-      showForm({datum:'',omschrijving:'',type:'Zakelijk',bedrag:'0.00',btw:'0.00',categorie:'Overige kosten',opmerking:''},21,'AI kon de bon niet uitlezen ('+e.message+'). Vul handmatig in.',false);
+      showForm({datum:'',omschrijving:'',type:'Zakelijk',bedrag:'0.00',btw:'0.00',categorie:'Overige kosten',betaald:'BUNQ Zakelijk (7361)',opmerking:''},21,'AI kon de bon niet uitlezen ('+e.message+'). Vul handmatig in.',false);
     });
     input.value='';
   };
@@ -563,21 +539,13 @@ function showForm(d,pct,err,aiOk){
   document.getElementById('f-bedrag').value=d.bedrag;
   document.getElementById('f-btw').value=d.btw;
   document.getElementById('f-categorie').value=d.categorie||'Overige kosten';
-  document.getElementById('f-betaald').value='ABN zakelijk';
+  setBetaaldVeld(d.betaald||'BUNQ Zakelijk (7361)');
   document.getElementById('f-opmerking').value=d.opmerking||'';
   document.getElementById('btn-save-sheets').style.display=sheetId?'flex':'none';
   document.getElementById('btn-verwijder').style.display='none';
-  document.getElementById('f-buitenland').checked=d.buitenland||false;
-  document.getElementById('btw-anders').value='';
   btwHandmatigMode=false;
   activeBTWpct=pct||21;
-  var standaard=[0,9,21];
-  if(standaard.indexOf(activeBTWpct)<0){
-    [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
-    document.getElementById('btw-anders').value=activeBTWpct;
-  } else {
-    [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.toggle('active',p===activeBTWpct);});
-  }
+  [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.toggle('active',p===activeBTWpct);});
 }
 
 function getFormData(){
@@ -587,10 +555,8 @@ function getFormData(){
     type:document.getElementById('f-type').value,
     bedrag:parseAmt(document.getElementById('f-bedrag').value),
     btw:parseAmt(document.getElementById('f-btw').value),
-    btwpct:activeBTWpct,
     categorie:document.getElementById('f-categorie').value,
-    betaald:document.getElementById('f-betaald').value,
-    buitenland:document.getElementById('f-buitenland').checked,
+    betaald:getBetaaldWaarde(),
     opmerking:document.getElementById('f-opmerking').value,
     id:editId||Date.now()
   };
@@ -598,45 +564,27 @@ function getFormData(){
 
 function saveBon(){
   var bon=getFormData();
-  if(editId){
-    var idx=bonnen.findIndex(function(b){return b.id===editId;});
-    if(idx>=0) bonnen[idx]=bon;
-    editId=null;
-  } else {
-    bonnen.unshift(bon);
-  }
-  slaOpslaan();
+  if(editId){var idx=bonnen.findIndex(function(b){return b.id===editId;});if(idx>=0)bonnen[idx]=bon;editId=null;}
+  else bonnen.unshift(bon);
   setScreen('overzicht');
 }
 
 function saveBonSheets(){
   var bon=getFormData();
-  if(editId){
-    var idx=bonnen.findIndex(function(b){return b.id===editId;});
-    if(idx>=0) bonnen[idx]=bon;
-    editId=null;
-  } else {
-    bonnen.unshift(bon);
-  }
-  slaOpslaan();
+  if(editId){var idx=bonnen.findIndex(function(b){return b.id===editId;});if(idx>=0)bonnen[idx]=bon;editId=null;}
+  else bonnen.unshift(bon);
   var btn=document.getElementById('btn-save-sheets');
-  btn.textContent='⏳ Bezig...';
-  btn.disabled=true;
+  btn.textContent='⏳ Bezig...';btn.disabled=true;
   var row=[bon.datum,bon.omschrijving,bon.bedrag.toFixed(2),bon.btw.toFixed(2),bon.type,bon.categorie,bon.betaald,'Ja',bon.opmerking];
-  fetch('/api/sheets',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({row:row,sheetId:sheetId,tabName:sheetTab})
-  }).then(function(res){
-    if(!res.ok) throw new Error('Sheet fout '+res.status);
+  fetch('/api/sheets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({row:row,sheetId:sheetId,tabName:sheetTab})})
+  .then(function(res){if(!res.ok)throw new Error('Sheet fout '+res.status);
     document.getElementById('form-ok').textContent='✓ Opgeslagen in Google Sheets!';
     document.getElementById('form-ok').style.display='block';
     setTimeout(function(){setScreen('overzicht');},1200);
   }).catch(function(e){
     document.getElementById('form-err').textContent='Sheet opslaan mislukt: '+e.message+'. Bon is wel lokaal opgeslagen.';
     document.getElementById('form-err').style.display='block';
-    btn.textContent='📊 Opslaan in Google Sheets';
-    btn.disabled=false;
+    btn.textContent='📊 Opslaan in Google Sheets';btn.disabled=false;
     setTimeout(function(){setScreen('overzicht');},2000);
   });
 }
@@ -648,7 +596,7 @@ function exportCSV(){
   var csv=rows.map(function(r){return r.join(';');}).join('\n');
   var a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download='bonnen-'+activeJaar+(activeKwartaal!=='alle'?'-'+activeKwartaal:'')+'.csv';
+  a.download='bonnen'+(activeKwartaal!=='alle'?'-'+activeKwartaal:'')+'.csv';
   a.click();
 }
 
