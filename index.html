@@ -73,6 +73,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
 .nav-btn{flex:1;padding:10px 4px 8px;background:none;border:none;cursor:pointer;font-size:10px;color:#888;display:flex;flex-direction:column;align-items:center;gap:3px}
 .nav-btn.active{color:#1D9E75}
 .nav-icon{font-size:20px;line-height:1}
+/* Bevestig dialoog */
 .confirm-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:100;align-items:center;justify-content:center}
 .confirm-overlay.show{display:flex}
 .confirm-box{background:#fff;border-radius:16px;padding:20px;margin:20px;max-width:320px;width:100%;text-align:center}
@@ -147,9 +148,15 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
         <button class="btw-pct-btn" id="btw-0" onclick="setBTWpct(0)">0%</button>
         <button class="btw-pct-btn" id="btw-9" onclick="setBTWpct(9)">9%</button>
         <button class="btw-pct-btn active" id="btw-21" onclick="setBTWpct(21)">21%</button>
+        <input type="number" id="btw-anders" min="0" max="99" placeholder="%" oninput="setBTWanders(this.value)" style="width:56px;text-align:center;font-size:13px;padding:7px 4px;border-radius:8px;border:1px solid #ddd;background:#fafafa">
       </div>
       <label>BTW bedrag (€)</label>
       <input type="text" id="f-btw" oninput="btwHandmatig()">
+      <div style="margin-top:8px">
+        <label style="display:flex;align-items:center;gap:8px;margin-top:0;font-size:13px;color:#555;cursor:pointer">
+          <input type="checkbox" id="f-buitenland" style="width:auto;margin:0"> Buitenlandse bon
+        </label>
+      </div>
       <label>Categorie</label>
       <select id="f-categorie">
         <option>Software</option>
@@ -200,6 +207,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
   </div>
 </div>
 
+<!-- Bevestig verwijder dialoog -->
 <div class="confirm-overlay" id="confirm-overlay">
   <div class="confirm-box">
     <h3>Bon verwijderen?</h3>
@@ -233,8 +241,8 @@ var sheetId=localStorage.getItem('sheetId')||'';
 var sheetTab=localStorage.getItem('sheetTab')||'Uitgavenoverzicht';
 var activeBTWpct=21;
 var btwHandmatigMode=false;
-var editId=null;
-var verwijderId=null;
+var editId=null; // ID van bon die bewerkt wordt
+var verwijderId=null; // ID van bon die verwijderd wordt
 
 function fmt(n){return '€ '+parseFloat(n||0).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function parseAmt(s){return parseFloat((s||'0').toString().replace(/[€\s]/g,'').replace(',','.'))||0;}
@@ -266,7 +274,7 @@ function renderQTabs(){
   var kwartalen=getKwartalen();
   var bar=document.getElementById('q-tabs-bar');
   bar.innerHTML=kwartalen.map(function(q){
-    return '<button class="q-tab'+(activeKwartaal===q?' active':'')+(q==='alle'?'':'')+'" onclick="setKwartaal(\''+q+'\')">'+q+'</button>';
+    return '<button class="q-tab'+(activeKwartaal===q?' active':'')+'" onclick="setKwartaal(\'' +q+ '\')">'+q+'</button>';
   }).join('');
 }
 
@@ -285,6 +293,7 @@ function setJaar(j){
     var el=document.getElementById('jaartab-'+y);
     if(el) el.classList.toggle('active',y===j);
   });
+
   renderQTabs();
   renderOverzicht();
 }
@@ -313,7 +322,10 @@ function setScreen(s){
   }
 }
 
-function goBack(){editId=null;setScreen('overzicht');}
+function goBack(){
+  editId=null;
+  setScreen('overzicht');
+}
 
 function saveSheetSettings(){
   sheetId=document.getElementById('sheet-id-input').value.trim();
@@ -339,6 +351,8 @@ function badgeClass(type){
 
 function renderOverzicht(){
   renderQTabs();
+
+  // jaar tab highlight
   [2025,2026].forEach(function(y){
     var el=document.getElementById('jaartab-'+y);
     if(el) el.classList.toggle('active',y===activeJaar);
@@ -359,12 +373,12 @@ function renderTab(){
   var el=document.getElementById('tab-content');
   var lijst=gefilterdeBonnen();
   if(activeTab==='bonnen'){
-    if(!lijst.length){el.innerHTML='<div class="empty">Geen bonnen in '+activeJaar+(activeKwartaal!=='alle'?' '+activeKwartaal:'')+'</div>';return;}
+    if(!lijst.length){el.innerHTML='<div class="empty">Geen bonnen'+(activeKwartaal!=='alle'?' in '+activeKwartaal+' '+activeJaar:' in '+activeJaar)+(activeJaar===2026?' — voeg er een toe!':'')+'</div>';return;}
     el.innerHTML=lijst.map(function(b){
       return '<div class="bon-row">'+
         '<div class="bon-info">'+
           '<div class="bon-name">'+(b.omschrijving||'—')+'</div>'+
-          '<div class="bon-meta">'+b.datum+' · <span class="badge '+badgeClass(b.type)+'">'+b.type+'</span> · '+(b.categorie||'')+'</div>'+
+          '<div class="bon-meta">'+b.datum+' · <span class="badge '+badgeClass(b.type)+'">'+b.type+'</span> · '+(b.categorie||'')+(b.buitenland?' · 🌍':'')+'</div>'+
         '</div>'+
         '<div style="display:flex;align-items:center;gap:8px;margin-left:8px">'+
           '<div style="text-align:right"><div class="bon-amt">'+fmt(b.bedrag)+'</div>'+(b.btw>0?'<div class="bon-btw">BTW '+fmt(b.btw)+'</div>':'')+'</div>'+
@@ -401,6 +415,7 @@ function renderTab(){
   }
 }
 
+// Bon bewerken
 function bewerkBon(id){
   var bon=bonnen.find(function(b){return b.id===id;});
   if(!bon) return;
@@ -424,15 +439,24 @@ function bewerkBon(id){
   document.getElementById('f-opmerking').value=bon.opmerking||'';
   document.getElementById('btn-save-sheets').style.display='none';
   document.getElementById('btn-verwijder').style.display='flex';
-  btwHandmatigMode=true;
-  [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
+  document.getElementById('f-buitenland').checked=bon.buitenland||false;
+  document.getElementById('btw-anders').value='';
+  btwHandmatigMode=false;
+  activeBTWpct=bon.btwpct!==undefined?bon.btwpct:21;
+  if([0,9,21].indexOf(activeBTWpct)>=0){
+    [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.toggle('active',p===activeBTWpct);});
+  } else {
+    [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
+    document.getElementById('btw-anders').value=activeBTWpct;
+  }
 }
 
+// Verwijder bevestiging
 function vraagVerwijder(id){
   var bon=bonnen.find(function(b){return b.id===id;});
   if(!bon) return;
   verwijderId=id;
-  document.getElementById('confirm-txt').textContent='Verwijder "'+(bon.omschrijving||'deze bon')+'"?';
+  document.getElementById('confirm-txt').textContent='Verwijder "'+( bon.omschrijving||'deze bon')+'"?';
   document.getElementById('confirm-overlay').classList.add('show');
 }
 
@@ -451,12 +475,27 @@ function bevestigVerwijder(){
   if(editId){editId=null;setScreen('overzicht');}else{renderOverzicht();}
 }
 
-function verwijderBon(){if(editId){vraagVerwijder(editId);}}
+function verwijderBon(){
+  if(editId){
+    vraagVerwijder(editId);
+  }
+}
 
+// BTW knoppen
 function setBTWpct(pct){
   activeBTWpct=pct;
   btwHandmatigMode=false;
   [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.toggle('active',p===pct);});
+  document.getElementById('btw-anders').value='';
+  herbereken();
+}
+
+function setBTWanders(val){
+  var pct=parseFloat(val);
+  if(isNaN(pct)||val==='') return;
+  activeBTWpct=pct;
+  btwHandmatigMode=false;
+  [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
   herbereken();
 }
 
@@ -470,6 +509,7 @@ function herbereken(){
 function btwHandmatig(){
   btwHandmatigMode=true;
   [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
+  document.getElementById('btw-anders').value='';
 }
 
 function handleFile(input){
@@ -527,9 +567,17 @@ function showForm(d,pct,err,aiOk){
   document.getElementById('f-opmerking').value=d.opmerking||'';
   document.getElementById('btn-save-sheets').style.display=sheetId?'flex':'none';
   document.getElementById('btn-verwijder').style.display='none';
+  document.getElementById('f-buitenland').checked=d.buitenland||false;
+  document.getElementById('btw-anders').value='';
   btwHandmatigMode=false;
   activeBTWpct=pct||21;
-  [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.toggle('active',p===activeBTWpct);});
+  var standaard=[0,9,21];
+  if(standaard.indexOf(activeBTWpct)<0){
+    [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
+    document.getElementById('btw-anders').value=activeBTWpct;
+  } else {
+    [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.toggle('active',p===activeBTWpct);});
+  }
 }
 
 function getFormData(){
@@ -539,8 +587,10 @@ function getFormData(){
     type:document.getElementById('f-type').value,
     bedrag:parseAmt(document.getElementById('f-bedrag').value),
     btw:parseAmt(document.getElementById('f-btw').value),
+    btwpct:activeBTWpct,
     categorie:document.getElementById('f-categorie').value,
     betaald:document.getElementById('f-betaald').value,
+    buitenland:document.getElementById('f-buitenland').checked,
     opmerking:document.getElementById('f-opmerking').value,
     id:editId||Date.now()
   };
@@ -593,7 +643,7 @@ function saveBonSheets(){
 
 function exportCSV(){
   var lijst=gefilterdeBonnen();
-  var rows=[['Datum','Omschrijving','Bedrag incl. BTW','BTW bedrag','Zakelijk/Privé','Categorie','Betaald via','Bon aanwezig','Opmerking']];
+  var rows=[['Datum','Omschrijving','Bedrag incl. BTW','BTW bedrag','Zakelijk/Priv\u00e9','Categorie','Betaald via','Bon aanwezig','Opmerking']];
   lijst.forEach(function(b){rows.push([b.datum,b.omschrijving,b.bedrag.toFixed(2),b.btw.toFixed(2),b.type,b.categorie||'',b.betaald||'','Ja',b.opmerking||'']);});
   var csv=rows.map(function(r){return r.join(';');}).join('\n');
   var a=document.createElement('a');
@@ -615,4 +665,3 @@ setScreen('overzicht');
 </script>
 </body>
 </html>
-```
