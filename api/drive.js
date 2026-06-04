@@ -16,8 +16,8 @@ export default async function handler(req, res) {
 
     const drive = google.drive({ version: 'v3', auth });
 
-    // Zoek of maak map: X65P
-    const rootId = await getOrCreateFolder(drive, 'X65P', null);
+    // Root map: X65P (vaste map-ID in pennysahertian@gmail.com Drive)
+    const rootId = '1WhN45acR-PUQTyI6l7xBeookXoBpq7X0';
     // Zoek of maak map: 2026
     const jaarId = await getOrCreateFolder(drive, jaar || '2026', rootId);
     // Zoek of maak map: Q2
