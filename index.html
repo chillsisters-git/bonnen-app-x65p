@@ -184,7 +184,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
       <label>Opmerking</label>
       <input type="text" id="f-opmerking" placeholder="Optioneel">
       <button class="btn-green" style="margin-top:16px" onclick="saveBon()">✓ Opslaan</button>
-      <button class="btn-sheets" id="btn-save-sheets" onclick="saveBonSheets()" style="display:none">📊 Opslaan in Google Sheets</button>
+      <button class="btn-sheets" id="btn-save-sheets" onclick="saveBonSheets()">📊 Opslaan in Google Sheets</button>
       <button class="btn-red" id="btn-verwijder" onclick="verwijderBon()" style="display:none">🗑 Verwijderen</button>
     </div>
   </div>
@@ -203,18 +203,11 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
     </div>
     <div class="section-title">Google Drive koppeling</div>
     <div class="sheets-setup">
-      <p>Bonnen worden automatisch opgeslagen in Google Drive onder <strong>X65P / 2026 / Q2</strong> (etc.).</p>
-      <div id="drive-status" style="font-size:12px;color:#888;margin-top:4px"></div>
+      <p>Bonnen worden automatisch opgeslagen in Google Drive onder <strong>X65P / jaar / kwartaal</strong>.</p>
     </div>
     <div class="section-title">Google Sheets koppeling</div>
     <div class="sheets-setup">
-      <p>Plak hier de ID van je Google Sheet.</p>
-      <label>Sheet ID</label>
-      <input type="text" id="sheet-id-input" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
-      <label>Tabblad naam</label>
-      <input type="text" id="sheet-tab-input" placeholder="Uitgavenoverzicht" value="Uitgavenoverzicht">
-      <button class="btn-green" style="margin-top:12px" onclick="saveSheetSettings()">Opslaan</button>
-      <div id="sheet-status" style="margin-top:8px;font-size:12px;color:#888"></div>
+      <p>Data wordt automatisch naar het juiste kwartaal-tabblad gestuurd.</p>
     </div>
     <div class="section-title">Kolommen in Google Sheets</div>
     <div class="sheets-setup">
@@ -254,8 +247,6 @@ var activeTab='bonnen';
 var activeKwartaal='alle';
 var activeJaar='alle';
 var previewSrc=null;
-var sheetId=localStorage.getItem('sheetId')||'';
-var sheetTab=localStorage.getItem('sheetTab')||'Uitgavenoverzicht';
 var activeBTWpct=21;
 var btwHandmatigMode=false;
 var editId=null;
@@ -337,18 +328,9 @@ function setScreen(s){
   document.getElementById('header-title').textContent=titles[s]||s;
   ['overzicht','upload','instellingen'].forEach(function(x){var nb=document.getElementById('nav-'+x);if(nb)nb.classList.toggle('active',x===s);});
   if(s==='overzicht') renderOverzicht();
-  if(s==='instellingen'){document.getElementById('sheet-id-input').value=sheetId;document.getElementById('sheet-tab-input').value=sheetTab;}
 }
 
 function goBack(){editId=null;setScreen('overzicht');}
-
-function saveSheetSettings(){
-  sheetId=document.getElementById('sheet-id-input').value.trim();
-  sheetTab=document.getElementById('sheet-tab-input').value.trim()||'Uitgavenoverzicht';
-  localStorage.setItem('sheetId',sheetId);localStorage.setItem('sheetTab',sheetTab);
-  document.getElementById('sheet-status').textContent='✓ Opgeslagen!';
-  setTimeout(function(){document.getElementById('sheet-status').textContent='';},2000);
-}
 
 function setTab(t){
   activeTab=t;
@@ -543,7 +525,7 @@ function showForm(d,pct,err,aiOk){
   document.getElementById('f-categorie').value=d.categorie||'Overige kosten';
   setBetaaldVeld(d.betaald||'BUNQ Zakelijk (7361)');
   document.getElementById('f-opmerking').value=d.opmerking||'';
-  document.getElementById('btn-save-sheets').style.display=sheetId?'flex':'none';
+  document.getElementById('btn-save-sheets').style.display='flex';
   document.getElementById('btn-verwijder').style.display='none';
   btwHandmatigMode=false;
   activeBTWpct=pct||21;
@@ -606,8 +588,10 @@ function saveBonSheets(){
   var btn=document.getElementById('btn-save-sheets');
   btn.textContent='⏳ Bezig...';btn.disabled=true;
   var row=[bon.datum,bon.omschrijving,bon.bedrag.toFixed(2),bon.btw.toFixed(2),bon.type,bon.categorie,bon.betaald,'Ja',bon.opmerking];
-  fetch('/api/sheets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({row:row,sheetId:sheetId,tabName:sheetTab})})
-  .then(function(res){if(!res.ok)throw new Error('Sheet fout '+res.status);
+  fetch('/api/sheets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({row:row})})
+  .then(function(res){if(!res.ok)throw new Error('Sheet fout '+res.status);return res.json();})
+  .then(function(data){
+    if(data.error)throw new Error(data.error);
     document.getElementById('form-ok').textContent='✓ Opgeslagen in Google Sheets!';
     document.getElementById('form-ok').style.display='block';
     setTimeout(function(){setScreen('overzicht');},1200);
@@ -621,8 +605,8 @@ function saveBonSheets(){
 
 function exportCSV(){
   var lijst=gefilterdeBonnen();
-  var rows=[['Datum','Omschrijving','Bedrag incl. BTW','BTW bedrag','Zakelijk/Priv\u00e9','Categorie','Betaald via','Bon aanwezig','Opmerking','Drive link']];
-  lijst.forEach(function(b){rows.push([b.datum,b.omschrijving,b.bedrag.toFixed(2),b.btw.toFixed(2),b.type,b.categorie||'',b.betaald||'','Ja',b.opmerking||'',b.driveLink||'']);});
+  var rows=[['Datum','Omschrijving','Bedrag incl. BTW','BTW bedrag','Zakelijk/Priv\u00e9','Categorie','Betaald via','Bon aanwezig','Opmerking']];
+  lijst.forEach(function(b){rows.push([b.datum,b.omschrijving,b.bedrag.toFixed(2),b.btw.toFixed(2),b.type,b.categorie||'',b.betaald||'','Ja',b.opmerking||'']);});
   var csv=rows.map(function(r){return r.join(';');}).join('\n');
   var a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
