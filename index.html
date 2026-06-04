@@ -439,13 +439,20 @@ function bewerkBon(id){
 function setBetaaldVeld(waarde){
   var sel=document.getElementById('f-betaald');
   var opties=['BUNQ Zakelijk (7361)','VISA (5749)','BUNQ Privé (4183)','ABN Privé (4178)','Contant','Anders'];
+  var andersEl=document.getElementById('f-betaald-anders');
   if(opties.indexOf(waarde)>=0){
     sel.value=waarde;
-    document.getElementById('f-betaald-anders').style.display='none';
+    andersEl.style.display='none';
+    andersEl.value='';
+  } else if(waarde && waarde.startsWith('Anders:')){
+    // AI vond cijfers maar geen match — zet in Anders veld
+    sel.value='Anders';
+    andersEl.style.display='block';
+    andersEl.value=waarde.replace('Anders:...','Eindigt op ');
   } else {
     sel.value='Anders';
-    document.getElementById('f-betaald-anders').style.display='block';
-    document.getElementById('f-betaald-anders').value=waarde;
+    andersEl.style.display='block';
+    andersEl.value=waarde||'';
   }
 }
 
@@ -514,7 +521,9 @@ function handleFile(input){
       var pct=21;
       if(bedrag>0){var calc=Math.round((btw/bedrag)*100*100)/100;if(calc<1)pct=0;else if(calc<12)pct=9;else pct=21;}
       // Rekening matchen
-      var betaald=matchRekening(parsed.rekening_cijfers)||'BUNQ Zakelijk (7361)';
+      var betaald=matchRekening(parsed.rekening_cijfers);
+      if(!betaald && parsed.rekening_cijfers) betaald='Anders:...'+parsed.rekening_cijfers;
+      else if(!betaald) betaald='BUNQ Zakelijk (7361)';
       showForm({datum:parsed.datum||'',omschrijving:parsed.omschrijving||'',type:'Zakelijk',bedrag:bedrag.toFixed(2),btw:btw.toFixed(2),categorie:cat,betaald:betaald,opmerking:parsed.opmerking||''},pct,null,true);
     }).catch(function(e){
       showForm({datum:'',omschrijving:'',type:'Zakelijk',bedrag:'0.00',btw:'0.00',categorie:'Overige kosten',betaald:'BUNQ Zakelijk (7361)',opmerking:''},21,'AI kon de bon niet uitlezen ('+e.message+'). Vul handmatig in.',false);
