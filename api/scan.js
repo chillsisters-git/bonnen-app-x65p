@@ -1,80 +1,93 @@
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-  const { image, mediaType } = req.body;
-  if (!image) {
-    return res.status(400).json({ error: 'Geen afbeelding meegestuurd' });
-  }
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: 'API sleutel niet geconfigureerd' });
-  }
+const Anthropic = require("@anthropic-ai/sdk");
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const MAX_SIZE = 1.2 * 1024 * 1024; // 1.2MB
+
+// Bekende rekeningen van de opdrachtgever
+const REKENINGEN = [
+  { cijfers: "7361", naam: "BUNQ Zakelijk" },
+  { cijfers: "5749", naam: "VISA" },
+  { cijfers: "4183", naam: "BUNQ Privé" },
+  { cijfers: "4178", naam: "ABN Privé" },
+];
+
+const REKENINGEN_PROMPT = REKENINGEN.map(
+  (r) => `- Laatste 4 cijfers ${r.cijfers} = ${r.naam}`
+).join("\n");
+
+async function resizeIfNeeded(base64, mediaType) {
+  if (Buffer.from(base64, "base64").length <= MAX_SIZE) return { base64, mediaType };
+  // Verklein via sharp indien beschikbaar, anders geef terug wat er is
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: mediaType || 'image/jpeg',
-                  data: image,
-                },
-              },
-              {
-                type: 'text',
-                text: `Lees deze bon/factuur uit en geef de volgende gegevens terug als JSON (alleen JSON, geen uitleg):
+    const sharp = require("sharp");
+    const buf = Buffer.from(base64, "base64");
+    const out = await sharp(buf).resize({ width: 1200, withoutEnlargement: true }).jpeg({ quality: 75 }).toBuffer();
+    return { base64: out.toString("base64"), mediaType: "image/jpeg" };
+  } catch {
+    return { base64, mediaType };
+  }
+}
+
+module.exports = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  const { image, mediaType } = req.body;
+  if (!image) return res.status(400).json({ error: "Geen afbeelding ontvangen" });
+
+  const { base64: img, mediaType: mt } = await resizeIfNeeded(image, mediaType || "image/jpeg");
+
+  const prompt = `Je bent een assistent die bonnen en facturen uitleest voor een Nederlandse ZZP-er.
+
+Lees de volgende gegevens uit de bon/factuur en geef ze terug als JSON:
+
+1. datum — in formaat DD-MM-JJJJ
+2. omschrijving — naam van winkel/leverancier + korte omschrijving wat het is
+3. bedrag_incl — totaalbedrag inclusief BTW als getal (bijv. 24.95)
+4. btw_bedrag — BTW bedrag als getal (bijv. 4.33). Als het niet op de bon staat, bereken het dan op basis van 21%.
+5. categorie — kies de meest passende uit: Software, Marketing, Opleidingen, Reiskosten, Telefoon en Internet, Kantoor, Bankkosten, Overige kosten
+6. rekening_cijfers — zoek op de bon naar een rekeningnummer of IBAN. Geef de laatste 4 cijfers terug als tekst (bijv. "7361"). 
+   De bekende rekeningen zijn:
+${REKENINGEN_PROMPT}
+   Als er geen rekeningnummer op de bon staat, geef dan null terug.
+7. opmerking — eventuele relevante opmerking, anders leeg
+
+Geef ALLEEN een JSON object terug, geen uitleg of markdown. Formaat:
 {
   "datum": "DD-MM-JJJJ",
-  "omschrijving": "naam winkel of leverancier + korte omschrijving",
+  "omschrijving": "...",
   "bedrag_incl": 0.00,
   "btw_bedrag": 0.00,
-  "categorie": "een van: Software / Marketing / Opleidingen / Reiskosten / Telefoon en Internet / Kantoor / Bankkosten / Overige kosten",
-  "opmerking": null
-}
-Regels:
-- bedrag_incl is het totaalbedrag inclusief BTW
-- btw_bedrag is het BTW bedrag (zoek naar BTW, tax, VAT op de bon)
-- Als BTW niet vermeld staat, bereken dan 21% van het excl. bedrag
-- datum altijd in DD-MM-JJJJ formaat
-- Als een veld niet leesbaar is, gebruik dan null`,
-              },
-            ],
-          },
-        ],
-      }),
+  "categorie": "...",
+  "rekening_cijfers": "7361",
+  "opmerking": ""
+}`;
+
+  try {
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: { type: "base64", media_type: mt, data: img },
+            },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
     });
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error('Anthropic API fout:', errorBody);
-      return res.status(response.status).json({ error: 'Fout bij AI verwerking', details: errorBody });
-    }
-    const data = await response.json();
-    const rawText = data.content?.[0]?.text || '';
-    let parsed = null;
-    try {
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsed = JSON.parse(jsonMatch[0]);
-      }
-    } catch (e) {
-      console.error('JSON parse fout:', e);
-    }
-    return res.status(200).json({ result: parsed, raw: rawText });
+
+    const text = response.content[0].text.trim();
+    const clean = text.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(clean);
+
+    return res.status(200).json({ result: parsed });
   } catch (err) {
-    console.error('Server fout:', err);
-    return res.status(500).json({ error: 'Interne serverfout', details: err.message });
+    console.error("Scan fout:", err);
+    return res.status(500).json({ error: err.message });
   }
-}
+};
