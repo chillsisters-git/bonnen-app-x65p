@@ -3,12 +3,12 @@ const SHEET_ID = '1zmaHID1ZQVe05KjnuJJUsGoDeEpoR9QMNHuCFUcYycg';
 
 function getTabName(datum) {
   // datum formaat: DD-MM-JJJJ
-  if (!datum) return "Q1'26";
+  if (!datum) return "Q1-2026";
   var parts = datum.split('-');
   if (parts.length < 3) return "Q1'26";
   var maand = parseInt(parts[1], 10);
   var jaar = parts[2];
-  var jaarShort = jaar.slice(2); // "2026" → "26"
+  var jaarShort = jaar; // "2026" volledig gebruiken
 
   var kwartaal;
   if (maand <= 3) kwartaal = 'Q1';
@@ -16,10 +16,10 @@ function getTabName(datum) {
   else if (maand <= 9) kwartaal = 'Q3';
   else kwartaal = 'Q4';
 
-  return kwartaal + "'" + jaarShort; // bijv. "Q2'26"
+  return kwartaal + '-' + jaar; // bijv. "Q2-2026"
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
