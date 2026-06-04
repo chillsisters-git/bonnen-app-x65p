@@ -91,6 +91,11 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
   </div>
 
   <div id="screen-overzicht">
+    <div class="q-tabs" style="margin-bottom:6px">
+      <button class="q-tab active" id="ytab-alle" onclick="setJaar('alle')">Alle jaren</button>
+      <button class="q-tab" id="ytab-2025" onclick="setJaar('2025')">2025</button>
+      <button class="q-tab" id="ytab-2026" onclick="setJaar('2026')">2026</button>
+    </div>
     <div class="q-tabs">
       <button class="q-tab active" id="qtab-alle" onclick="setKwartaal('alle')">Alles</button>
       <button class="q-tab" id="qtab-Q1" onclick="setKwartaal('Q1')">Q1</button>
@@ -240,6 +245,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
 var bonnen=[];
 var activeTab='bonnen';
 var activeKwartaal='alle';
+var activeJaar='alle';
 var previewSrc=null;
 var sheetId=localStorage.getItem('sheetId')||'';
 var sheetTab=localStorage.getItem('sheetTab')||'Uitgavenoverzicht';
@@ -294,9 +300,28 @@ function getKwartaal(datum){
   return 'Q4';
 }
 
+function getJaar(datum){
+  if(!datum) return null;
+  var parts=datum.split('-');
+  if(parts.length<3) return null;
+  return parts[2];
+}
+
+function setJaar(j){
+  activeJaar=j;
+  ['alle','2025','2026'].forEach(function(x){
+    var el=document.getElementById('ytab-'+x);
+    if(el) el.classList.toggle('active',x===j);
+  });
+  renderOverzicht();
+}
+
 function gefilterdeBonnen(){
-  if(activeKwartaal==='alle') return bonnen;
-  return bonnen.filter(function(b){return getKwartaal(b.datum)===activeKwartaal;});
+  return bonnen.filter(function(b){
+    var kwOk=activeKwartaal==='alle'||getKwartaal(b.datum)===activeKwartaal;
+    var jaarOk=activeJaar==='alle'||getJaar(b.datum)===activeJaar;
+    return kwOk&&jaarOk;
+  });
 }
 
 function setKwartaal(q){
