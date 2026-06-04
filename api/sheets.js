@@ -14,7 +14,7 @@ function getTabName(datum) {
   else if (maand <= 6) kwartaal = 'Q2';
   else if (maand <= 9) kwartaal = 'Q3';
   else kwartaal = 'Q4';
-  return kwartaal + '-' + jaar;
+  return kwartaal + '-' + jaar.slice(2);
 }
 
 function postData(url, data) {
