@@ -1,45 +1,608 @@
-// Dit bestand zorgt ervoor dat de bonnen permanent worden opgeslagen
-// in de Upstash-opslag die net aan het project is gekoppeld.
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bonnen Scanner</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f7;color:#1d1d1f;min-height:100vh}
+.app{max-width:420px;margin:0 auto;padding:1rem;padding-bottom:70px}
+.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.header h1{font-size:16px;font-weight:500}
+.btn-back{background:none;border:none;font-size:20px;cursor:pointer;color:#666;padding:0}
+.btn-csv{font-size:11px;padding:4px 10px;border-radius:8px;border:1px solid #ddd;background:#fff;cursor:pointer}
+.btn-green{width:100%;padding:14px;border-radius:12px;border:none;background:#1D9E75;color:#fff;font-size:15px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px}
+.btn-sec{width:100%;padding:11px;border-radius:12px;border:1px solid #ddd;background:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px}
+.btn-sheets{width:100%;padding:11px;border-radius:12px;border:none;background:#0F9D58;color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px;font-weight:500}
+.btn-red{width:100%;padding:11px;border-radius:12px;border:none;background:#c0392b;color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px;font-weight:500}
+.drop-zone{border:1.5px dashed #ccc;border-radius:12px;padding:1.5rem;text-align:center;background:#fafafa;margin-bottom:1rem;cursor:pointer}
+.drop-zone p{font-size:13px;color:#888}
+.drop-zone small{font-size:11px;color:#aaa}
+.tip{background:#f0faf6;border-radius:10px;padding:10px 12px;font-size:12px;color:#555;display:flex;gap:8px;margin-bottom:8px}
+.card{background:#fff;border-radius:12px;padding:12px;margin-bottom:10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1rem}
+.stat-card{background:#fff;border-radius:10px;padding:14px}
+.stat-label{font-size:11px;color:#888;margin-bottom:4px}
+.stat-val{font-size:22px;font-weight:600}
+.q-tabs{display:flex;gap:6px;margin-bottom:1rem;overflow-x:auto;padding-bottom:2px}
+.q-tab{flex:1;text-align:center;font-size:12px;font-weight:500;padding:7px 4px;border-radius:8px;border:1px solid #ddd;background:#fff;cursor:pointer;color:#888;white-space:nowrap;min-width:48px}
+.q-tab.active{background:#1D9E75;color:#fff;border-color:#1D9E75}
+.tabs{display:flex;border-bottom:1px solid #eee;margin-bottom:1rem}
+.tab{flex:1;text-align:center;font-size:12px;padding:8px 4px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;color:#888}
+.tab.active{color:#1D9E75;border-bottom-color:#1D9E75;font-weight:500}
+.bon-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f0f0f0}
+.bon-info{flex:1;min-width:0}
+.bon-name{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+.bon-meta{font-size:11px;color:#888;margin-top:3px;display:flex;align-items:center;gap:5px}
+.badge{font-size:10px;padding:2px 7px;border-radius:6px;font-weight:500}
+.badge-zakelijk{background:#e6f7f1;color:#0f6e56}
+.badge-prive{background:#fef3e2;color:#854f0b}
+.badge-anders{background:#f0f0f0;color:#555}
+.bon-amt{font-size:13px;font-weight:500;text-align:right}
+.bon-btw{font-size:10px;color:#888}
+.bon-actions{display:flex;gap:6px;margin-left:8px}
+.btn-edit{font-size:14px;padding:4px 6px;border-radius:6px;border:1px solid #ddd;background:#fff;cursor:pointer}
+.btn-del{font-size:14px;padding:4px 6px;border-radius:6px;border:1px solid #fdd;background:#fff3f3;cursor:pointer}
+label{font-size:11px;color:#888;display:block;margin-bottom:3px;margin-top:10px}
+input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:1px solid #ddd;background:#fafafa;color:#1d1d1f}
+.btw-pct-row{display:flex;gap:6px;margin-top:6px}
+.btw-pct-btn{flex:1;padding:7px 0;border-radius:8px;border:1px solid #ddd;background:#fff;font-size:13px;cursor:pointer;color:#555;font-weight:500;transition:all .15s}
+.btw-pct-btn.active{background:#1D9E75;color:#fff;border-color:#1D9E75}
+.preview-img{width:100%;max-height:130px;object-fit:contain;border-radius:10px;margin-bottom:12px;background:#f5f5f7}
+.err{font-size:12px;color:#c0392b;background:#fdecea;padding:8px 10px;border-radius:8px;margin-bottom:10px}
+.ok{font-size:12px;color:#0f6e56;background:#e6f7f1;padding:8px 10px;border-radius:8px;margin-bottom:10px}
+.ai-hint{font-size:11px;color:#1D9E75;margin-bottom:12px}
+.loader{text-align:center;padding:3rem}
+.loader-icon{font-size:32px;margin-bottom:12px}
+.loader-txt{font-size:14px;color:#888}
+.empty{font-size:13px;color:#888;text-align:center;padding:2rem}
+.bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.bar-bg{flex:1;height:8px;background:#f0f0f0;border-radius:99px;overflow:hidden}
+.bar-fill{height:100%;border-radius:99px}
+.bar-amt{font-size:11px;width:72px;text-align:right}
+.section-title{font-size:12px;font-weight:500;color:#888;margin:16px 0 6px;text-transform:uppercase;letter-spacing:.5px}
+.sheets-setup{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px}
+.sheets-setup p{font-size:13px;color:#555;margin-bottom:10px}
+#screen-overzicht,#screen-upload,#screen-controleer,#screen-instellingen{display:none}
+.nav-bar{display:flex;background:#fff;border-top:1px solid #eee;position:fixed;bottom:0;left:0;right:0;z-index:10}
+.nav-btn{flex:1;padding:10px 4px 8px;background:none;border:none;cursor:pointer;font-size:10px;color:#888;display:flex;flex-direction:column;align-items:center;gap:3px}
+.nav-btn.active{color:#1D9E75}
+.nav-icon{font-size:20px;line-height:1}
+/* Bevestig dialoog */
+.confirm-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:100;align-items:center;justify-content:center}
+.confirm-overlay.show{display:flex}
+.confirm-box{background:#fff;border-radius:16px;padding:20px;margin:20px;max-width:320px;width:100%;text-align:center}
+.confirm-box h3{font-size:15px;font-weight:600;margin-bottom:8px}
+.confirm-box p{font-size:13px;color:#888;margin-bottom:16px}
+.confirm-btns{display:flex;gap:8px}
+.confirm-btns button{flex:1;padding:10px;border-radius:10px;border:none;font-size:14px;font-weight:500;cursor:pointer}
+.confirm-cancel{background:#f0f0f0;color:#555}
+.confirm-delete{background:#c0392b;color:#fff}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <button class="btn-back" id="btn-back" onclick="goBack()" style="visibility:hidden">←</button>
+    <h1 id="header-title">Overzicht</h1>
+    <button class="btn-csv" id="btn-csv" onclick="exportCSV()">↓ CSV</button>
+  </div>
 
-const REDIS_URL = process.env.KV_REST_API_URL;
-const REDIS_TOKEN = process.env.KV_REST_API_TOKEN;
-const KEY = 'bonnen-data';
+  <div id="screen-overzicht">
+    <div class="q-tabs">
+      <button class="q-tab active" id="qtab-alle" onclick="setKwartaal('alle')">Alles</button>
+      <button class="q-tab" id="qtab-Q1" onclick="setKwartaal('Q1')">Q1</button>
+      <button class="q-tab" id="qtab-Q2" onclick="setKwartaal('Q2')">Q2</button>
+      <button class="q-tab" id="qtab-Q3" onclick="setKwartaal('Q3')">Q3</button>
+      <button class="q-tab" id="qtab-Q4" onclick="setKwartaal('Q4')">Q4</button>
+    </div>
+    <div class="grid2" id="stats-grid"></div>
+    <div class="tabs">
+      <button class="tab active" id="tab-bonnen" onclick="setTab('bonnen')">Bonnen</button>
+      <button class="tab" id="tab-cat" onclick="setTab('cat')">Per categorie</button>
+    </div>
+    <div id="tab-content"></div>
+    <button class="btn-green" style="margin-top:1rem" onclick="setScreen('upload')">+ Nieuwe bon toevoegen</button>
+  </div>
 
-async function redisGet() {
-  const r = await fetch(`${REDIS_URL}/get/${KEY}`, {
-    headers: { Authorization: `Bearer ${REDIS_TOKEN}` }
-  });
-  const data = await r.json();
-  return data.result; // null als er nog niks is opgeslagen
+  <div id="screen-upload">
+    <input type="file" id="camera-input" accept="image/*" capture="environment" style="display:none" onchange="handleFile(this)">
+    <input type="file" id="file-input" accept="image/*,application/pdf" style="display:none" onchange="handleFile(this)">
+    <button class="btn-green" onclick="document.getElementById('camera-input').click()">📷 Foto maken van bon</button>
+    <button class="btn-sec" onclick="document.getElementById('file-input').click()">↑ Bestand uploaden</button>
+    <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+      <p>Of sleep een bon hierheen</p>
+      <small>JPG, PNG of PDF</small>
+    </div>
+    <div class="tip">💡 <span>AI leest datum, bedrag en BTW automatisch uit</span></div>
+  </div>
+
+  <div id="screen-controleer">
+    <div class="loader" id="loader">
+      <div class="loader-icon">🔍</div>
+      <div class="loader-txt">AI leest de bon uit...</div>
+    </div>
+    <div id="form-container" style="display:none">
+      <img id="preview-img" class="preview-img" style="display:none">
+      <div class="err" id="form-err" style="display:none"></div>
+      <div class="ok" id="form-ok" style="display:none"></div>
+      <div class="ai-hint" id="ai-hint" style="display:none">✨ AI heeft uitgelezen — controleer en sla op</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><label>Datum</label><input type="text" id="f-datum" placeholder="DD-MM-JJJJ"></div>
+        <div><label>Zakelijk / Privé</label>
+          <select id="f-type">
+            <option value="Zakelijk">Zakelijk</option>
+            <option value="Privé">Privé</option>
+          </select>
+        </div>
+      </div>
+      <label>Omschrijving</label>
+      <input type="text" id="f-omschrijving">
+      <label>Bedrag incl. BTW (€)</label>
+      <input type="text" id="f-bedrag" oninput="herbereken()">
+      <label>BTW percentage</label>
+      <div class="btw-pct-row">
+        <button class="btw-pct-btn" id="btw-0" onclick="setBTWpct(0)">0%</button>
+        <button class="btw-pct-btn" id="btw-9" onclick="setBTWpct(9)">9%</button>
+        <button class="btw-pct-btn active" id="btw-21" onclick="setBTWpct(21)">21%</button>
+      </div>
+      <label>BTW bedrag (€)</label>
+      <input type="text" id="f-btw" oninput="btwHandmatig()">
+      <label>Categorie</label>
+      <select id="f-categorie">
+        <option>Software</option>
+        <option>Marketing</option>
+        <option>Opleidingen</option>
+        <option>Reiskosten</option>
+        <option>Telefoon en Internet</option>
+        <option>Kantoor</option>
+        <option>Bankkosten</option>
+        <option>Overige kosten</option>
+        <option>-</option>
+      </select>
+      <label>Betaald via</label>
+      <select id="f-betaald">
+        <option>ABN zakelijk</option>
+        <option>ABN prive</option>
+        <option>Bunq zakelijk</option>
+        <option>Bunq prive</option>
+        <option>Revolut</option>
+        <option>Contant</option>
+        <option>Overig</option>
+      </select>
+      <label>Opmerking</label>
+      <input type="text" id="f-opmerking" placeholder="Optioneel">
+      <button class="btn-green" style="margin-top:16px" onclick="saveBon()">✓ Opslaan</button>
+      <button class="btn-sheets" id="btn-save-sheets" onclick="saveBonSheets()" style="display:none">📊 Opslaan in Google Sheets</button>
+      <button class="btn-red" id="btn-verwijder" onclick="verwijderBon()" style="display:none">🗑 Verwijderen</button>
+    </div>
+  </div>
+
+  <div id="screen-instellingen">
+    <div class="section-title">Google Sheets koppeling</div>
+    <div class="sheets-setup">
+      <p>Plak hier de ID van je Google Sheet.</p>
+      <label>Sheet ID</label>
+      <input type="text" id="sheet-id-input" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
+      <label>Tabblad naam</label>
+      <input type="text" id="sheet-tab-input" placeholder="Uitgavenoverzicht" value="Uitgavenoverzicht">
+      <button class="btn-green" style="margin-top:12px" onclick="saveSheetSettings()">Opslaan</button>
+      <div id="sheet-status" style="margin-top:8px;font-size:12px;color:#888"></div>
+    </div>
+    <div class="section-title">Kolommen in Google Sheets</div>
+    <div class="sheets-setup">
+      <p style="font-size:12px;color:#888;line-height:1.8">
+        A: Datum · B: Omschrijving · C: Bedrag incl. BTW · D: BTW bedrag · E: Zakelijk/Privé · F: Categorie · G: Betaald via · H: Bon aanwezig · I: Opmerking
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- Bevestig verwijder dialoog -->
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-box">
+    <h3>Bon verwijderen?</h3>
+    <p id="confirm-txt">Weet je zeker dat je deze bon wilt verwijderen?</p>
+    <div class="confirm-btns">
+      <button class="confirm-cancel" onclick="sluitConfirm()">Annuleren</button>
+      <button class="confirm-delete" onclick="bevestigVerwijder()">Verwijderen</button>
+    </div>
+  </div>
+</div>
+
+<div class="nav-bar">
+  <button class="nav-btn active" id="nav-overzicht" onclick="setScreen('overzicht')">
+    <span class="nav-icon">📋</span>Overzicht
+  </button>
+  <button class="nav-btn" id="nav-upload" onclick="setScreen('upload')">
+    <span class="nav-icon">➕</span>Bon toevoegen
+  </button>
+  <button class="nav-btn" id="nav-instellingen" onclick="setScreen('instellingen')">
+    <span class="nav-icon">⚙️</span>Instellingen
+  </button>
+</div>
+
+<script>
+var bonnen=[];
+var activeTab='bonnen';
+var activeKwartaal='alle';
+var previewSrc=null;
+var sheetId=localStorage.getItem('sheetId')||'';
+var sheetTab=localStorage.getItem('sheetTab')||'Uitgavenoverzicht';
+var activeBTWpct=21;
+var btwHandmatigMode=false;
+var editId=null; // ID van bon die bewerkt wordt
+var verwijderId=null; // ID van bon die verwijderd wordt
+
+function fmt(n){return '€ '+parseFloat(n||0).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function parseAmt(s){return parseFloat((s||'0').toString().replace(/[€\s]/g,'').replace(',','.'))||0;}
+
+function getKwartaal(datum){
+  if(!datum) return null;
+  var parts=datum.split('-');
+  if(parts.length<2) return null;
+  var maand=parseInt(parts[1],10);
+  if(maand<=3) return 'Q1';
+  if(maand<=6) return 'Q2';
+  if(maand<=9) return 'Q3';
+  return 'Q4';
 }
 
-async function redisSet(value) {
-  await fetch(`${REDIS_URL}/set/${KEY}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
-    body: value
-  });
+function gefilterdeBonnen(){
+  if(activeKwartaal==='alle') return bonnen;
+  return bonnen.filter(function(b){return getKwartaal(b.datum)===activeKwartaal;});
 }
 
-export default async function handler(req, res) {
-  try {
-    if (req.method === 'GET') {
-      const raw = await redisGet();
-      const bonnen = raw ? JSON.parse(raw) : [];
-      return res.status(200).json({ bonnen });
-    }
+function setKwartaal(q){
+  activeKwartaal=q;
+  ['alle','Q1','Q2','Q3','Q4'].forEach(function(x){
+    var el=document.getElementById('qtab-'+x);
+    if(el) el.classList.toggle('active',x===q);
+  });
+  renderOverzicht();
+}
 
-    if (req.method === 'POST') {
-      const bonnen = req.body && req.body.bonnen;
-      if (!Array.isArray(bonnen)) {
-        return res.status(400).json({ error: 'bonnen moet een lijst zijn' });
-      }
-      await redisSet(JSON.stringify(bonnen));
-      return res.status(200).json({ ok: true });
-    }
-
-    res.status(405).json({ error: 'Methode niet toegestaan' });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+function setScreen(s){
+  ['overzicht','upload','controleer','instellingen'].forEach(function(x){document.getElementById('screen-'+x).style.display='none';});
+  document.getElementById('screen-'+s).style.display='block';
+  document.getElementById('btn-back').style.visibility=(s==='controleer')?'visible':'hidden';
+  document.getElementById('btn-csv').style.display=s==='overzicht'?'':'none';
+  var titles={overzicht:'Overzicht',upload:'Bon toevoegen',controleer:'Controleer bon',instellingen:'Instellingen'};
+  document.getElementById('header-title').textContent=titles[s]||s;
+  ['overzicht','upload','instellingen'].forEach(function(x){
+    var nb=document.getElementById('nav-'+x);
+    if(nb) nb.classList.toggle('active',x===s);
+  });
+  if(s==='overzicht') renderOverzicht();
+  if(s==='instellingen'){
+    document.getElementById('sheet-id-input').value=sheetId;
+    document.getElementById('sheet-tab-input').value=sheetTab;
   }
 }
+
+function goBack(){
+  editId=null;
+  setScreen('overzicht');
+}
+
+function saveSheetSettings(){
+  sheetId=document.getElementById('sheet-id-input').value.trim();
+  sheetTab=document.getElementById('sheet-tab-input').value.trim()||'Uitgavenoverzicht';
+  localStorage.setItem('sheetId',sheetId);
+  localStorage.setItem('sheetTab',sheetTab);
+  document.getElementById('sheet-status').textContent='✓ Opgeslagen!';
+  setTimeout(function(){document.getElementById('sheet-status').textContent='';},2000);
+}
+
+function setTab(t){
+  activeTab=t;
+  ['bonnen','cat'].forEach(function(x){document.getElementById('tab-'+x).classList.toggle('active',x===t);});
+  renderTab();
+}
+
+function badgeClass(type){
+  var t=(type||'').toLowerCase();
+  if(t==='zakelijk') return 'badge-zakelijk';
+  if(t==='privé'||t==='prive') return 'badge-prive';
+  return 'badge-anders';
+}
+
+function renderOverzicht(){
+  var lijst=gefilterdeBonnen();
+  var totUitgaven=lijst.reduce(function(s,b){return s+b.bedrag;},0);
+  var totBTW=lijst.reduce(function(s,b){return s+b.btw;},0);
+  document.getElementById('stats-grid').innerHTML=[
+    {l:'Totaal uitgaven',v:totUitgaven,c:'#D85A30'},
+    {l:'BTW aftrekpost',v:totBTW,c:'#BA7517'}
+  ].map(function(s){
+    return '<div class="stat-card"><div class="stat-label">'+s.l+'</div><div class="stat-val" style="color:'+s.c+'">'+fmt(s.v)+'</div></div>';
+  }).join('');
+  renderTab();
+}
+
+function renderTab(){
+  var el=document.getElementById('tab-content');
+  var lijst=gefilterdeBonnen();
+  if(activeTab==='bonnen'){
+    if(!lijst.length){el.innerHTML='<div class="empty">Geen bonnen'+(activeKwartaal!=='alle'?' in '+activeKwartaal:'')+' — voeg er een toe!</div>';return;}
+    el.innerHTML=lijst.map(function(b){
+      return '<div class="bon-row">'+
+        '<div class="bon-info">'+
+          '<div class="bon-name">'+(b.omschrijving||'—')+'</div>'+
+          '<div class="bon-meta">'+b.datum+' · <span class="badge '+badgeClass(b.type)+'">'+b.type+'</span> · '+(b.categorie||'')+'</div>'+
+        '</div>'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-left:8px">'+
+          '<div style="text-align:right"><div class="bon-amt">'+fmt(b.bedrag)+'</div>'+(b.btw>0?'<div class="bon-btw">BTW '+fmt(b.btw)+'</div>':'')+'</div>'+
+          '<div class="bon-actions">'+
+            '<button class="btn-edit" onclick="bewerkBon('+b.id+')">✏️</button>'+
+            '<button class="btn-del" onclick="vraagVerwijder('+b.id+')">🗑</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+    }).join('');
+  } else {
+    var catMap={};
+    lijst.forEach(function(b){
+      var c=b.categorie||'Overig';
+      if(!catMap[c]) catMap[c]={u:0,btw:0,n:0};
+      catMap[c].u+=b.bedrag;
+      catMap[c].btw+=b.btw;
+      catMap[c].n++;
+    });
+    var entries=Object.keys(catMap).sort(function(a,b){return catMap[b].u-catMap[a].u;});
+    if(!entries.length){el.innerHTML='<div class="empty">Geen data</div>';return;}
+    var max=Math.max.apply(null,entries.map(function(k){return catMap[k].u;}));
+    el.innerHTML=entries.map(function(k){
+      var d=catMap[k];
+      return '<div class="card">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+        '<span style="font-size:13px;font-weight:500">'+k+'</span>'+
+        '<span style="font-size:11px;color:#888">'+d.n+' bon'+(d.n!==1?'nen':'')+'</span></div>'+
+        '<div class="bar-row"><div class="bar-bg"><div class="bar-fill" style="width:'+(d.u/max*100)+'%;background:#D85A30"></div></div></div>'+
+        '<div style="display:flex;justify-content:space-between;margin-top:6px">'+
+        '<span style="font-size:12px;color:#888">BTW: '+fmt(d.btw)+'</span>'+
+        '<span style="font-size:13px;font-weight:600">'+fmt(d.u)+'</span></div></div>';
+    }).join('');
+  }
+}
+
+// Bon bewerken
+function bewerkBon(id){
+  var bon=bonnen.find(function(b){return b.id===id;});
+  if(!bon) return;
+  editId=id;
+  previewSrc=null;
+  setScreen('controleer');
+  document.getElementById('loader').style.display='none';
+  document.getElementById('form-container').style.display='block';
+  document.getElementById('preview-img').style.display='none';
+  document.getElementById('form-err').style.display='none';
+  document.getElementById('form-ok').style.display='none';
+  document.getElementById('ai-hint').style.display='none';
+  document.getElementById('header-title').textContent='Bon bewerken';
+  document.getElementById('f-datum').value=bon.datum;
+  document.getElementById('f-omschrijving').value=bon.omschrijving;
+  document.getElementById('f-type').value=bon.type;
+  document.getElementById('f-bedrag').value=bon.bedrag.toFixed(2);
+  document.getElementById('f-btw').value=bon.btw.toFixed(2);
+  document.getElementById('f-categorie').value=bon.categorie||'Overige kosten';
+  document.getElementById('f-betaald').value=bon.betaald||'ABN zakelijk';
+  document.getElementById('f-opmerking').value=bon.opmerking||'';
+  document.getElementById('btn-save-sheets').style.display='none';
+  document.getElementById('btn-verwijder').style.display='flex';
+  // BTW pct detecteren
+  btwHandmatigMode=true;
+  [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
+}
+
+// Verwijder bevestiging
+function vraagVerwijder(id){
+  var bon=bonnen.find(function(b){return b.id===id;});
+  if(!bon) return;
+  verwijderId=id;
+  document.getElementById('confirm-txt').textContent='Verwijder "'+( bon.omschrijving||'deze bon')+'"?';
+  document.getElementById('confirm-overlay').classList.add('show');
+}
+
+function sluitConfirm(){
+  document.getElementById('confirm-overlay').classList.remove('show');
+  verwijderId=null;
+}
+
+function bevestigVerwijder(){
+  if(verwijderId){
+    bonnen=bonnen.filter(function(b){return b.id!==verwijderId;});
+    verwijderId=null;
+    bewaarBonnen();
+  }
+  document.getElementById('confirm-overlay').classList.remove('show');
+  renderOverzicht();
+}
+
+function verwijderBon(){
+  if(editId){
+    vraagVerwijder(editId);
+  }
+}
+
+// BTW knoppen
+function setBTWpct(pct){
+  activeBTWpct=pct;
+  btwHandmatigMode=false;
+  [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.toggle('active',p===pct);});
+  herbereken();
+}
+
+function herbereken(){
+  if(btwHandmatigMode) return;
+  var bedrag=parseAmt(document.getElementById('f-bedrag').value);
+  var btw=bedrag-(bedrag/((100+activeBTWpct)/100));
+  document.getElementById('f-btw').value=btw>0?btw.toFixed(2):'0.00';
+}
+
+function btwHandmatig(){
+  btwHandmatigMode=true;
+  [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.remove('active');});
+}
+
+function handleFile(input){
+  var file=input.files[0]; if(!file) return;
+  editId=null;
+  setScreen('controleer');
+  document.getElementById('loader').style.display='block';
+  document.getElementById('form-container').style.display='none';
+  var reader=new FileReader();
+  reader.onload=function(e){
+    previewSrc=e.target.result;
+    var base64=e.target.result.split(',')[1];
+    var mediaType=file.type||'image/jpeg';
+    fetch('/api/scan',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({image:base64,mediaType:mediaType})
+    }).then(function(res){
+      if(!res.ok) return res.text().then(function(t){throw new Error('API fout '+res.status+': '+t);});
+      return res.json();
+    }).then(function(data){
+      if(!data.result) throw new Error('Lege respons van API');
+      var parsed=data.result;
+      var cats=['Software','Marketing','Opleidingen','Reiskosten','Telefoon en Internet','Kantoor','Bankkosten','Overige kosten','-'];
+      var cat=cats.indexOf(parsed.categorie)>=0?parsed.categorie:'Overige kosten';
+      var bedrag=parsed.bedrag_incl||0;
+      var btw=parsed.btw_bedrag||0;
+      var pct=21;
+      if(bedrag>0){var calc=Math.round((btw/bedrag)*100*100)/100;if(calc<1)pct=0;else if(calc<12)pct=9;else pct=21;}
+      showForm({datum:parsed.datum||'',omschrijving:parsed.omschrijving||'',type:'Zakelijk',bedrag:bedrag.toFixed(2),btw:btw.toFixed(2),categorie:cat,opmerking:parsed.opmerking||''},pct,null,true);
+    }).catch(function(e){
+      showForm({datum:'',omschrijving:'',type:'Zakelijk',bedrag:'0.00',btw:'0.00',categorie:'Overige kosten',opmerking:''},21,'AI kon de bon niet uitlezen ('+e.message+'). Vul handmatig in.',false);
+    });
+    input.value='';
+  };
+  reader.readAsDataURL(file);
+}
+
+function showForm(d,pct,err,aiOk){
+  document.getElementById('loader').style.display='none';
+  document.getElementById('form-container').style.display='block';
+  var img=document.getElementById('preview-img');
+  if(previewSrc){img.src=previewSrc;img.style.display='block';} else img.style.display='none';
+  var errEl=document.getElementById('form-err');
+  if(err){errEl.textContent=err;errEl.style.display='block';} else errEl.style.display='none';
+  document.getElementById('form-ok').style.display='none';
+  document.getElementById('ai-hint').style.display=aiOk?'block':'none';
+  document.getElementById('f-datum').value=d.datum;
+  document.getElementById('f-omschrijving').value=d.omschrijving;
+  document.getElementById('f-type').value=d.type||'Zakelijk';
+  document.getElementById('f-bedrag').value=d.bedrag;
+  document.getElementById('f-btw').value=d.btw;
+  document.getElementById('f-categorie').value=d.categorie||'Overige kosten';
+  document.getElementById('f-betaald').value='ABN zakelijk';
+  document.getElementById('f-opmerking').value=d.opmerking||'';
+  document.getElementById('btn-save-sheets').style.display=sheetId?'flex':'none';
+  document.getElementById('btn-verwijder').style.display='none';
+  btwHandmatigMode=false;
+  activeBTWpct=pct||21;
+  [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.toggle('active',p===activeBTWpct);});
+}
+
+function getFormData(){
+  return {
+    datum:document.getElementById('f-datum').value,
+    omschrijving:document.getElementById('f-omschrijving').value,
+    type:document.getElementById('f-type').value,
+    bedrag:parseAmt(document.getElementById('f-bedrag').value),
+    btw:parseAmt(document.getElementById('f-btw').value),
+    categorie:document.getElementById('f-categorie').value,
+    betaald:document.getElementById('f-betaald').value,
+    opmerking:document.getElementById('f-opmerking').value,
+    id:editId||Date.now()
+  };
+}
+
+function saveBon(){
+  var bon=getFormData();
+  if(editId){
+    var idx=bonnen.findIndex(function(b){return b.id===editId;});
+    if(idx>=0) bonnen[idx]=bon;
+    editId=null;
+  } else {
+    bonnen.unshift(bon);
+  }
+  bewaarBonnen();
+  setScreen('overzicht');
+}
+
+function saveBonSheets(){
+  var bon=getFormData();
+  if(editId){
+    var idx=bonnen.findIndex(function(b){return b.id===editId;});
+    if(idx>=0) bonnen[idx]=bon;
+    editId=null;
+  } else {
+    bonnen.unshift(bon);
+  }
+  bewaarBonnen();
+  var btn=document.getElementById('btn-save-sheets');
+  btn.textContent='⏳ Bezig...';
+  btn.disabled=true;
+  var row=[bon.datum,bon.omschrijving,bon.bedrag.toFixed(2),bon.btw.toFixed(2),bon.type,bon.categorie,bon.betaald,'Ja',bon.opmerking];
+  fetch('/api/sheets',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({row:row,sheetId:sheetId,tabName:sheetTab})
+  }).then(function(res){
+    if(!res.ok) throw new Error('Sheet fout '+res.status);
+    document.getElementById('form-ok').textContent='✓ Opgeslagen in Google Sheets!';
+    document.getElementById('form-ok').style.display='block';
+    setTimeout(function(){setScreen('overzicht');},1200);
+  }).catch(function(e){
+    document.getElementById('form-err').textContent='Sheet opslaan mislukt: '+e.message+'. Bon is wel lokaal opgeslagen.';
+    document.getElementById('form-err').style.display='block';
+    btn.textContent='📊 Opslaan in Google Sheets';
+    btn.disabled=false;
+    setTimeout(function(){setScreen('overzicht');},2000);
+  });
+}
+
+function exportCSV(){
+  var lijst=gefilterdeBonnen();
+  var rows=[['Datum','Omschrijving','Bedrag incl. BTW','BTW bedrag','Zakelijk/Priv\u00e9','Categorie','Betaald via','Bon aanwezig','Opmerking']];
+  lijst.forEach(function(b){rows.push([b.datum,b.omschrijving,b.bedrag.toFixed(2),b.btw.toFixed(2),b.type,b.categorie||'',b.betaald||'','Ja',b.opmerking||'']);});
+  var csv=rows.map(function(r){return r.join(';');}).join('\n');
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='bonnen'+(activeKwartaal!=='alle'?'-'+activeKwartaal:'')+'.csv';
+  a.click();
+}
+
+// --- Permanente opslag (Upstash, via /api/bonnen) ---
+function laadBonnen(){
+  fetch('/api/bonnen').then(function(res){return res.json();}).then(function(data){
+    bonnen=data.bonnen||[];
+    setScreen('overzicht');
+  }).catch(function(){
+    setScreen('overzicht');
+  });
+}
+
+function bewaarBonnen(){
+  fetch('/api/bonnen',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({bonnen:bonnen})
+  }).catch(function(e){console.error('Opslaan mislukt',e);});
+}
+
+var dz=document.getElementById('drop-zone');
+dz.addEventListener('dragover',function(e){e.preventDefault();dz.style.borderColor='#1D9E75';});
+dz.addEventListener('dragleave',function(){dz.style.borderColor='#ccc';});
+dz.addEventListener('drop',function(e){
+  e.preventDefault();dz.style.borderColor='#ccc';
+  var f=e.dataTransfer.files[0];
+  if(f){var dt=new DataTransfer();dt.items.add(f);document.getElementById('file-input').files=dt.files;handleFile(document.getElementById('file-input'));}
+});
+
+laadBonnen();
+</script>
+</body>
+</html>
