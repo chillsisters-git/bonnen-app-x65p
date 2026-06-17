@@ -165,14 +165,57 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
       <input type="text" id="f-btw" oninput="btwHandmatig()">
       <label>Categorie</label>
       <select id="f-categorie">
-        <option>Software</option>
-        <option>Marketing</option>
-        <option>Opleidingen</option>
-        <option>Reiskosten</option>
-        <option>Telefoon en Internet</option>
-        <option>Kantoor</option>
+        <option>Accountants- en administratiekosten</option>
+        <option>Advertenties</option>
+        <option>Aflossing langlopende lening</option>
+        <option>Algemene kosten</option>
+        <option>Autokosten</option>
+        <option>Automatiseringkosten</option>
         <option>Bankkosten</option>
-        <option>Overige kosten</option>
+        <option>Betalingsverschillen</option>
+        <option>Beurskosten</option>
+        <option>Brandstof</option>
+        <option>Commissie</option>
+        <option>Commissie verkoop</option>
+        <option>Contributies en abonnementen</option>
+        <option>Crowdfundingkosten</option>
+        <option>Drukwerk, porti en vrachten</option>
+        <option>Eten &amp; drinken op kantoor</option>
+        <option>Fiscale advieskosten</option>
+        <option>Gas, water en licht</option>
+        <option>Huur bedrijfspand</option>
+        <option>Huur panden en terreinen</option>
+        <option>Inventaris</option>
+        <option>Kantoorbenodigdheden</option>
+        <option>Kilometervergoeding</option>
+        <option>Marketingkosten</option>
+        <option>Motorrijtuigenbelasting</option>
+        <option>Niet aftrekbare kosten</option>
+        <option>Niet aftrekbare representatiekosten</option>
+        <option>Opleidings- en studiekosten</option>
+        <option>Provisie aan derden</option>
+        <option>Reclamekosten</option>
+        <option>Regeling Corona</option>
+        <option>Reis- en verblijfkosten</option>
+        <option>Reiskosten OV</option>
+        <option>Relatiegeschenken</option>
+        <option>Rentekosten</option>
+        <option>Representatiekosten</option>
+        <option>Sponsorkosten</option>
+        <option>Telefoon en internet</option>
+        <option>Uitbesteed werk</option>
+        <option>Vakliteratuur</option>
+        <option>Verzekeringen</option>
+        <option>Zakenlunch of diner in horeca</option>
+        <option>Buitenlandse software binnen EU</option>
+        <option>Buitenlandse software buiten EU</option>
+        <option>Buitenlandse freelancers binnen EU</option>
+        <option>Buitenlandse freelancers buiten EU</option>
+        <option>Buitenlandse hotelkosten</option>
+        <option>Buitenlandse horeca</option>
+        <option>Buitenlandse btw op bon</option>
+        <option>Declaraties aan opdrachtgever</option>
+        <option>Doorbelaste kosten aan opdrachtgever</option>
         <option>-</option>
       </select>
       <label>Betaald via</label>
@@ -385,7 +428,7 @@ function renderTab(){
     }).join('');
   } else {
     var catMap={};
-    lijst.forEach(function(b){var c=b.categorie||'Overig';if(!catMap[c])catMap[c]={u:0,btw:0,n:0};catMap[c].u+=b.bedrag;catMap[c].btw+=b.btw;catMap[c].n++;});
+    lijst.forEach(function(b){var c=b.categorie||'Algemene kosten';if(!catMap[c])catMap[c]={u:0,btw:0,n:0};catMap[c].u+=b.bedrag;catMap[c].btw+=b.btw;catMap[c].n++;});
     var entries=Object.keys(catMap).sort(function(a,b){return catMap[b].u-catMap[a].u;});
     if(!entries.length){el.innerHTML='<div class="empty">Geen data</div>';return;}
     var max=Math.max.apply(null,entries.map(function(k){return catMap[k].u;}));
@@ -425,7 +468,7 @@ function bewerkBon(id){
   document.getElementById('f-type').value=bon.type;
   document.getElementById('f-bedrag').value=bon.bedrag.toFixed(2);
   document.getElementById('f-btw').value=bon.btw.toFixed(2);
-  document.getElementById('f-categorie').value=bon.categorie||'Overige kosten';
+  document.getElementById('f-categorie').value=bon.categorie||'Algemene kosten';
   setBetaaldVeld(bon.betaald||'BUNQ Zakelijk (7361)');
   document.getElementById('f-opmerking').value=bon.opmerking||'';
   document.getElementById('btn-save-sheets').style.display='none';
@@ -533,8 +576,8 @@ function handleFile(input){
     .then(function(data){
       if(!data.result)throw new Error('Lege respons van API');
       var parsed=data.result;
-      var cats=['Software','Marketing','Opleidingen','Reiskosten','Telefoon en Internet','Kantoor','Bankkosten','Overige kosten','-'];
-      var cat=cats.indexOf(parsed.categorie)>=0?parsed.categorie:'Overige kosten';
+      var cats=['Accountants- en administratiekosten','Advertenties','Aflossing langlopende lening','Algemene kosten','Autokosten','Automatiseringkosten','Bankkosten','Betalingsverschillen','Beurskosten','Brandstof','Commissie','Commissie verkoop','Contributies en abonnementen','Crowdfundingkosten','Drukwerk, porti en vrachten','Eten & drinken op kantoor','Fiscale advieskosten','Gas, water en licht','Huur bedrijfspand','Huur panden en terreinen','Inventaris','Kantoorbenodigdheden','Kilometervergoeding','Marketingkosten','Motorrijtuigenbelasting','Niet aftrekbare kosten','Niet aftrekbare representatiekosten','Opleidings- en studiekosten','Provisie aan derden','Reclamekosten','Regeling Corona','Reis- en verblijfkosten','Reiskosten OV','Relatiegeschenken','Rentekosten','Representatiekosten','Sponsorkosten','Telefoon en internet','Uitbesteed werk','Vakliteratuur','Verzekeringen','Zakenlunch of diner in horeca','Buitenlandse software binnen EU','Buitenlandse software buiten EU','Buitenlandse freelancers binnen EU','Buitenlandse freelancers buiten EU','Buitenlandse hotelkosten','Buitenlandse horeca','Buitenlandse btw op bon','Declaraties aan opdrachtgever','Doorbelaste kosten aan opdrachtgever','-'];
+      var cat=cats.indexOf(parsed.categorie)>=0?parsed.categorie:'Algemene kosten';
       var bedrag=parsed.bedrag_incl||0;
       var btw=parsed.btw_bedrag||0;
       var pct=21;
@@ -544,7 +587,7 @@ function handleFile(input){
       else if(!betaald)betaald='BUNQ Zakelijk (7361)';
       showForm({datum:parsed.datum||'',omschrijving:parsed.omschrijving||'',type:'Zakelijk',bedrag:bedrag.toFixed(2),btw:btw.toFixed(2),categorie:cat,betaald:betaald,opmerking:parsed.opmerking||''},pct,null,true);
     }).catch(function(e){
-      showForm({datum:'',omschrijving:'',type:'Zakelijk',bedrag:'0.00',btw:'0.00',categorie:'Overige kosten',betaald:'BUNQ Zakelijk (7361)',opmerking:''},21,'AI kon de bon niet uitlezen ('+e.message+'). Vul handmatig in.',false);
+      showForm({datum:'',omschrijving:'',type:'Zakelijk',bedrag:'0.00',btw:'0.00',categorie:'Algemene kosten',betaald:'BUNQ Zakelijk (7361)',opmerking:''},21,'AI kon de bon niet uitlezen ('+e.message+'). Vul handmatig in.',false);
     });
   });
   input.value='';
@@ -564,7 +607,7 @@ function showForm(d,pct,err,aiOk){
   document.getElementById('f-type').value=d.type||'Zakelijk';
   document.getElementById('f-bedrag').value=d.bedrag;
   document.getElementById('f-btw').value=d.btw;
-  document.getElementById('f-categorie').value=d.categorie||'Overige kosten';
+  document.getElementById('f-categorie').value=d.categorie||'Algemene kosten';
   setBetaaldVeld(d.betaald||'BUNQ Zakelijk (7361)');
   document.getElementById('f-opmerking').value=d.opmerking||'';
   document.getElementById('btn-save-sheets').style.display='flex';
