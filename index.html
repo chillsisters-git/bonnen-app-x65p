@@ -3,6 +3,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bonnen Scanner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f7;color:#1d1d1f;min-height:100vh}
@@ -90,7 +91,10 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
   <div class="header">
     <button class="btn-back" id="btn-back" onclick="goBack()" style="visibility:hidden">←</button>
     <h1 id="header-title">Overzicht</h1>
-    <button class="btn-csv" id="btn-csv" onclick="exportCSV()">↓ CSV</button>
+    <div style="display:flex;gap:6px">
+      <button class="btn-csv" id="btn-csv" onclick="exportCSV()">↓ CSV</button>
+      <button class="btn-csv" id="btn-zip" onclick="exportFotosZip()">📷 ZIP</button>
+    </div>
   </div>
 
   <div id="screen-overzicht">
@@ -324,6 +328,7 @@ function setScreen(s){
   document.getElementById('screen-'+s).style.display='block';
   document.getElementById('btn-back').style.visibility=(s==='controleer')?'visible':'hidden';
   document.getElementById('btn-csv').style.display=s==='overzicht'?'':'none';
+  document.getElementById('btn-zip').style.display=s==='overzicht'?'':'none';
   var titles={overzicht:'Overzicht',upload:'Bon toevoegen',controleer:'Controleer bon',instellingen:'Instellingen'};
   document.getElementById('header-title').textContent=titles[s]||s;
   ['overzicht','upload','instellingen'].forEach(function(x){var nb=document.getElementById('nav-'+x);if(nb)nb.classList.toggle('active',x===s);});
@@ -402,6 +407,15 @@ function bewerkBon(id){
   document.getElementById('loader').style.display='none';
   document.getElementById('form-container').style.display='block';
   document.getElementById('preview-img').style.display='none';
+  if(bon.heeftFoto){
+    fetch('/api/bonnen?type=foto&id='+bon.id).then(function(r){return r.json();}).then(function(data){
+      if(data.foto){
+        previewSrc=data.foto;
+        var img=document.getElementById('preview-img');
+        img.src=data.foto;img.style.display='block';
+      }
+    }).catch(function(){});
+  }
   document.getElementById('form-err').style.display='none';
   document.getElementById('form-ok').style.display='none';
   document.getElementById('ai-hint').style.display='none';
@@ -571,8 +585,61 @@ function getFormData(){
     categorie:document.getElementById('f-categorie').value,
     betaald:getBetaaldWaarde(),
     opmerking:document.getElementById('f-opmerking').value,
+    heeftFoto:!!previewSrc,
     id:editId||Date.now()
   };
+}
+
+function bewaarFoto(id,foto){
+  if(!foto) return;
+  fetch('/api/bonnen?type=foto&id='+id,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({foto:foto})
+  }).catch(function(e){console.error('Foto opslaan mislukt',e);});
+}
+
+function parseDatumVoorSortering(datum){
+  if(!datum) return 0;
+  var p=datum.split('-');
+  if(p.length<3) return 0;
+  return new Date(p[2],p[1]-1,p[0]).getTime();
+}
+
+function exportFotosZip(){
+  var lijst=gefilterdeBonnen().filter(function(b){return b.heeftFoto;});
+  if(!lijst.length){alert("Geen foto's gevonden om te downloaden in deze selectie.");return;}
+  var sorted=lijst.slice().sort(function(a,b){return parseDatumVoorSortering(a.datum)-parseDatumVoorSortering(b.datum);});
+  var btn=document.getElementById('btn-zip');
+  var origTxt=btn.textContent;
+  btn.textContent='⏳';
+  var zip=new JSZip();
+  function volgende(i){
+    if(i>=sorted.length){
+      zip.generateAsync({type:'blob'}).then(function(blob){
+        var a=document.createElement('a');
+        a.href=URL.createObjectURL(blob);
+        a.download='bon-fotos'+(activeJaar!=='alle'?'-'+activeJaar:'')+(activeKwartaal!=='alle'?'-'+activeKwartaal:'')+'.zip';
+        a.click();
+        btn.textContent=origTxt;
+      });
+      return;
+    }
+    var b=sorted[i];
+    fetch('/api/bonnen?type=foto&id='+b.id).then(function(r){return r.json();}).then(function(data){
+      if(data.foto){
+        var parts=data.foto.split(',');
+        var meta=parts[0];
+        var base64=parts[1];
+        var ext=meta.indexOf('png')>=0?'png':(meta.indexOf('pdf')>=0?'pdf':'jpg');
+        var omschr=(b.omschrijving||'bon').replace(/[^a-z0-9]/gi,'-').toLowerCase();
+        var naam=(b.datum||'onbekend')+'-'+omschr+'.'+ext;
+        zip.file(naam,base64,{base64:true});
+      }
+      volgende(i+1);
+    }).catch(function(){volgende(i+1);});
+  }
+  volgende(0);
 }
 
 function uploadToDrive(bon){
@@ -604,17 +671,18 @@ function saveBon(){
     editId=null;
   } else {
     bonnen.unshift(bon);
-    uploadToDrive(bon);
   }
   bewaarBonnen();
+  bewaarFoto(bon.id,previewSrc);
   setScreen('overzicht');
 }
 
 function saveBonSheets(){
   var bon=getFormData();
   if(editId){var idx=bonnen.findIndex(function(b){return b.id===editId;});if(idx>=0)bonnen[idx]=bon;editId=null;}
-  else{bonnen.unshift(bon);uploadToDrive(bon);}
+  else{bonnen.unshift(bon);}
   bewaarBonnen();
+  bewaarFoto(bon.id,previewSrc);
   var btn=document.getElementById('btn-save-sheets');
   btn.textContent='⏳ Bezig...';btn.disabled=true;
   var row=[bon.datum,bon.omschrijving,bon.bedrag.toFixed(2),bon.btw.toFixed(2),bon.type,bon.categorie,bon.betaald,'Ja',bon.opmerking];
