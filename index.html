@@ -478,17 +478,42 @@ function btwHandmatig(){
   document.getElementById('btw-anders').value='';
 }
 
+function comprimeerVoorVerzending(file,callback){
+  if(file.type==='application/pdf'){
+    var r=new FileReader();
+    r.onload=function(e){callback(e.target.result,file.type);};
+    r.readAsDataURL(file);
+    return;
+  }
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var img=new Image();
+    img.onload=function(){
+      var maxDim=1600;
+      var w=img.width,h=img.height;
+      if(w>maxDim||h>maxDim){
+        if(w>h){h=Math.round(h*(maxDim/w));w=maxDim;}
+        else{w=Math.round(w*(maxDim/h));h=maxDim;}
+      }
+      var canvas=document.createElement('canvas');
+      canvas.width=w;canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      callback(canvas.toDataURL('image/jpeg',0.8),'image/jpeg');
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
 function handleFile(input){
   var file=input.files[0];if(!file)return;
   editId=null;
   setScreen('controleer');
   document.getElementById('loader').style.display='block';
   document.getElementById('form-container').style.display='none';
-  var reader=new FileReader();
-  reader.onload=function(e){
-    previewSrc=e.target.result;
-    var base64=e.target.result.split(',')[1];
-    var mediaType=file.type||'image/jpeg';
+  comprimeerVoorVerzending(file,function(dataUrl,mediaType){
+    previewSrc=dataUrl;
+    var base64=dataUrl.split(',')[1];
     fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:base64,mediaType:mediaType})})
     .then(function(res){if(!res.ok)return res.text().then(function(t){throw new Error('API fout '+res.status+': '+t);});return res.json();})
     .then(function(data){
@@ -507,9 +532,8 @@ function handleFile(input){
     }).catch(function(e){
       showForm({datum:'',omschrijving:'',type:'Zakelijk',bedrag:'0.00',btw:'0.00',categorie:'Overige kosten',betaald:'BUNQ Zakelijk (7361)',opmerking:''},21,'AI kon de bon niet uitlezen ('+e.message+'). Vul handmatig in.',false);
     });
-    input.value='';
-  };
-  reader.readAsDataURL(file);
+  });
+  input.value='';
 }
 
 function showForm(d,pct,err,aiOk){
