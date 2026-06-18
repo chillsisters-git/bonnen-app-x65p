@@ -1,6 +1,8 @@
 const Anthropic = require("@anthropic-ai/sdk");
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MAX_SIZE = 1.2 * 1024 * 1024; // 1.2MB
+const ONDERSTEUNDE_AFBEELDINGEN = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+
 // Bekende rekeningen van de opdrachtgever
 const REKENINGEN = [
   { cijfers: "7361", naam: "BUNQ Zakelijk" },
@@ -31,6 +33,8 @@ const CATEGORIEEN = [
 const CATEGORIEEN_PROMPT = CATEGORIEEN.join(", ");
 
 async function resizeIfNeeded(base64, mediaType) {
+  // PDF's zijn geen afbeelding — sharp kan die niet verkleinen, dus ongewijzigd doorgeven
+  if (mediaType === "application/pdf") return { base64, mediaType };
   if (Buffer.from(base64, "base64").length <= MAX_SIZE) return { base64, mediaType };
   // Verklein via sharp indien beschikbaar, anders geef terug wat er is
   try {
@@ -42,11 +46,25 @@ async function resizeIfNeeded(base64, mediaType) {
     return { base64, mediaType };
   }
 }
+
 module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   const { image, mediaType } = req.body;
   if (!image) return res.status(400).json({ error: "Geen afbeelding ontvangen" });
-  const { base64: img, mediaType: mt } = await resizeIfNeeded(image, mediaType || "image/jpeg");
+
+  const mt = mediaType || "image/jpeg";
+  const isPdf = mt === "application/pdf";
+  const isAfbeelding = ONDERSTEUNDE_AFBEELDINGEN.indexOf(mt) >= 0;
+
+  // Duidelijke Nederlandse foutmelding voor formaten die echt niet ondersteund worden
+  if (!isPdf && !isAfbeelding) {
+    return res.status(400).json({
+      error: `Dit bestandsformaat (${mt}) wordt niet ondersteund. Upload een JPG, PNG of PDF.`,
+    });
+  }
+
+  const { base64: img, mediaType: finalMt } = await resizeIfNeeded(image, mt);
+
   const prompt = `Je bent een assistent die bonnen en facturen uitleest voor een Nederlandse ZZP-er.
 Lees de volgende gegevens uit de bon/factuur en geef ze terug als JSON:
 1. datum — in formaat DD-MM-JJJJ
@@ -69,6 +87,12 @@ Geef ALLEEN een JSON object terug, geen uitleg of markdown. Formaat:
   "rekening_cijfers": "7361",
   "opmerking": ""
 }`;
+
+  // PDF gaat als 'document'-block, afbeeldingen blijven 'image'-block
+  const contentBlock = isPdf
+    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: img } }
+    : { type: "image", source: { type: "base64", media_type: finalMt, data: img } };
+
   try {
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -77,10 +101,7 @@ Geef ALLEEN een JSON object terug, geen uitleg of markdown. Formaat:
         {
           role: "user",
           content: [
-            {
-              type: "image",
-              source: { type: "base64", media_type: mt, data: img },
-            },
+            contentBlock,
             { type: "text", text: prompt },
           ],
         },
