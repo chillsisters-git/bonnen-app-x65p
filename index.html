@@ -51,6 +51,8 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
 .btw-pct-btn{flex:1;padding:7px 0;border-radius:8px;border:1px solid #ddd;background:#fff;font-size:13px;cursor:pointer;color:#555;font-weight:500;transition:all .15s}
 .btw-pct-btn.active{background:#111111;color:#fff;border-color:#111111}
 .preview-img{width:100%;max-height:130px;object-fit:contain;border-radius:10px;margin-bottom:12px;background:#f5f5f7}
+.preview-pdf{width:100%;padding:28px 12px;text-align:center;border-radius:10px;margin-bottom:12px;background:#f5f5f7;color:#888;font-size:13px}
+.preview-pdf-icon{font-size:32px;display:block;margin-bottom:6px}
 .err{font-size:12px;color:#c0392b;background:#fdecea;padding:8px 10px;border-radius:8px;margin-bottom:10px}
 .ok{font-size:12px;color:#111;background:#f5f5f5;padding:8px 10px;border-radius:8px;margin-bottom:10px}
 .ai-hint{font-size:11px;color:#E31E24;margin-bottom:12px}
@@ -138,6 +140,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
     </div>
     <div id="form-container" style="display:none">
       <img id="preview-img" class="preview-img" style="display:none">
+      <div id="preview-pdf" class="preview-pdf" style="display:none"><span class="preview-pdf-icon">📄</span>PDF-bestand</div>
       <div class="err" id="form-err" style="display:none"></div>
       <div class="ok" id="form-ok" style="display:none"></div>
       <div class="ai-hint" id="ai-hint" style="display:none">✨ AI heeft uitgelezen — controleer en sla op</div>
@@ -462,6 +465,25 @@ function renderTab(){
   }
 }
 
+// Toont de juiste voorvertoning: foto in <img>, of een PDF-icoontje als het een PDF is
+function toonVoorvertoning(src){
+  var img=document.getElementById('preview-img');
+  var pdfBox=document.getElementById('preview-pdf');
+  if(!src){
+    img.style.display='none';
+    pdfBox.style.display='none';
+    return;
+  }
+  if(src.indexOf('data:application/pdf')===0){
+    img.style.display='none';
+    pdfBox.style.display='block';
+  } else {
+    img.src=src;
+    img.style.display='block';
+    pdfBox.style.display='none';
+  }
+}
+
 function bewerkBon(id){
   var bon=bonnen.find(function(b){return b.id===id;});
   if(!bon) return;
@@ -470,12 +492,12 @@ function bewerkBon(id){
   document.getElementById('loader').style.display='none';
   document.getElementById('form-container').style.display='block';
   document.getElementById('preview-img').style.display='none';
+  document.getElementById('preview-pdf').style.display='none';
   if(bon.heeftFoto){
     fetch('/api/bonnen?type=foto&id='+bon.id).then(function(r){return r.json();}).then(function(data){
       if(data.foto){
         previewSrc=data.foto;
-        var img=document.getElementById('preview-img');
-        img.src=data.foto;img.style.display='block';
+        toonVoorvertoning(data.foto);
       }
     }).catch(function(){});
   }
@@ -616,8 +638,7 @@ function handleFile(input){
 function showForm(d,pct,err,aiOk){
   document.getElementById('loader').style.display='none';
   document.getElementById('form-container').style.display='block';
-  var img=document.getElementById('preview-img');
-  if(previewSrc){img.src=previewSrc;img.style.display='block';}else img.style.display='none';
+  toonVoorvertoning(previewSrc);
   var errEl=document.getElementById('form-err');
   if(err){errEl.textContent=err;errEl.style.display='block';}else errEl.style.display='none';
   document.getElementById('form-ok').style.display='none';
