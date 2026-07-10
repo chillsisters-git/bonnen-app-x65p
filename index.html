@@ -233,6 +233,10 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
         <option value="Anders">Anders, namelijk...</option>
       </select>
       <input type="text" id="f-betaald-anders" placeholder="Bijv. creditcard zakelijk" style="display:none;margin-top:6px">
+      <label style="display:flex;align-items:center;gap:6px;margin-top:14px;cursor:pointer">
+        <input type="checkbox" id="f-herhalend" style="width:auto;margin:0">
+        <span style="font-size:12px;color:#555;text-transform:none;letter-spacing:normal">🔁 Herhalende post (bijv. lease/abonnement) — blijft koppelbaar aan elke nieuwe afschrijving</span>
+      </label>
       <label>Opmerking</label>
       <input type="text" id="f-opmerking" placeholder="Optioneel">
       <button class="btn-green" style="margin-top:16px" onclick="saveBon()">✓ Opslaan</button>
@@ -543,6 +547,12 @@ function bankBadge(bon){
     return ' · <span class="badge badge-anders">'+tekst+'</span>';
   }
   var txIds=matchesByBonId[bon.id];
+  if(bon.herhalend){
+    if(txIds&&txIds.length){
+      return ' · <span class="badge badge-zakelijk">🔁 Herhalend ('+txIds.length+'x, totaal '+fmt(gekoppeldTotaal(bon.id))+')</span>';
+    }
+    return ' · <span class="badge badge-prive">🔁 Herhalend — nog niet gekoppeld</span>';
+  }
   if(txIds&&txIds.length){
     if(isVolledigGematcht(bon)){
       var unlinkBtn=txIds.length===1?
@@ -707,7 +717,9 @@ function matchTransacties(){
 
   // Automatische matching raakt geen bonnen aan die al (deels) handmatig gekoppeld zijn —
   // splitsen van een bon over meerdere transacties kan alleen bewust, via de zoekvelden.
-  var beschikbareBonnen=bonnen.filter(function(b){return BEKENDE_REKENINGEN.indexOf(b.betaald)>=0&&!matchesByBonId[b.id];});
+  // Herhalende posten (lease/abonnement) sluiten we uit van automatische matching —
+  // die koppel je bewust elke keer opnieuw handmatig aan de nieuwste afschrijving.
+  var beschikbareBonnen=bonnen.filter(function(b){return BEKENDE_REKENINGEN.indexOf(b.betaald)>=0&&!matchesByBonId[b.id]&&!b.herhalend;});
   transacties.forEach(function(tx){
     if(tx.type!=='af') return;
     if(matchesByTxId[tx.id]) return; // al (handmatig) gekoppeld
@@ -740,6 +752,7 @@ function gekoppeldTotaal(bonId){
   return gekoppeldeTransacties(bonId).reduce(function(s,t){return s+t.bedrag;},0);
 }
 function isVolledigGematcht(bon){
+  if(bon.herhalend) return false; // blijft altijd koppelbaar aan een volgende afschrijving
   var txIds=matchesByBonId[bon.id];
   if(!txIds||!txIds.length) return false;
   return Math.abs(gekoppeldTotaal(bon.id)-bon.bedrag)<=0.01;
@@ -760,31 +773,45 @@ function filterKoppelOpties(kind,ownId,zoektekst){
   var containerId=(kind==='tx'?'opties-tx-':'opties-bon-')+ownId;
   var container=document.getElementById(containerId);
   if(!container) return;
-  if(!term){
-    container.style.display='none';
-    container.innerHTML='';
-    return;
-  }
   var bron=kind==='tx'?laatsteNietGematchteBonnen:laatsteTxNietGematcht;
-  var treffers=bron.filter(function(item){
+  var alles=bron.slice(); // volledige lijst, ook zonder zoekterm
+  var treffers=term?bron.filter(function(item){
     var bedragStr=(item.bedrag||0).toFixed(2);
     var haystack=((item.omschrijving||'')+' '+(item.datum||'')+' '+bedragStr+' '+bedragStr.replace('.',',')).toLowerCase();
     return haystack.indexOf(term)>=0;
-  }).slice(0,8);
+  }):alles;
 
   if(!treffers.length){
     container.innerHTML='<div style="font-size:12px;color:#888;padding:6px 2px">Geen resultaten</div>';
-    container.style.display='block';
+    container.style.cssText='display:block;max-height:220px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:4px;margin-top:4px';
     return;
   }
-  container.innerHTML=treffers.map(function(item){
+  var getoond=treffers.slice(0,30);
+  var meerNotitie=treffers.length>30?'<div style="font-size:11px;color:#888;padding:4px 2px">+ '+(treffers.length-30)+' meer — typ om te filteren</div>':'';
+  container.innerHTML=getoond.map(function(item){
     var label=(item.omschrijving||'—')+' · '+fmt(item.bedrag)+' · '+item.datum;
     var onclickAttr=kind==='tx'?
       'koppelHandmatig(\''+ownId+'\','+item.id+')':
       'koppelHandmatig(\''+item.id+'\','+ownId+')';
     return '<button class="btw-pct-btn" style="display:block;width:100%;margin-bottom:4px;text-align:left;font-size:12px" onclick="'+onclickAttr+'">'+label+'</button>';
-  }).join('');
-  container.style.display='block';
+  }).join('')+meerNotitie;
+  container.style.cssText='display:block;max-height:220px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:4px;margin-top:4px';
+}
+
+// Toont de volledige (nog ongefilterde) lijst zodra het zoekveld focus krijgt.
+function toonKoppelOpties(kind,ownId){
+  var inputId=(kind==='tx'?'zoek-tx-':'zoek-bon-')+ownId;
+  var input=document.getElementById(inputId);
+  filterKoppelOpties(kind,ownId,input?input.value:'');
+}
+// Verbergt de lijst weer nadat het zoekveld focus verliest — met kleine vertraging
+// zodat een klik op een resultaat nog kan worden geregistreerd.
+function verbergKoppelOpties(kind,ownId){
+  var containerId=(kind==='tx'?'opties-tx-':'opties-bon-')+ownId;
+  setTimeout(function(){
+    var c=document.getElementById(containerId);
+    if(c) c.style.display='none';
+  },200);
 }
 
 // Ontkoppelt één specifieke transactie van een bon (nodig omdat een bon meerdere
@@ -910,7 +937,7 @@ function renderBankTab(){
     html+=txNietGematcht.map(function(t){
       var koppelVeld=nietGematchteBonnen.length?
         '<div style="padding:0 0 10px">'+
-          '<input type="text" id="zoek-tx-'+t.id+'" placeholder="🔍 Zoek en koppel aan bon..." style="font-size:12px" oninput="filterKoppelOpties(\'tx\',\''+t.id+'\',this.value)">'+
+          '<input type="text" id="zoek-tx-'+t.id+'" placeholder="🔍 Zoek of kies uit de lijst..." style="font-size:12px" oninput="filterKoppelOpties(\'tx\',\''+t.id+'\',this.value)" onfocus="toonKoppelOpties(\'tx\',\''+t.id+'\')" onblur="verbergKoppelOpties(\'tx\',\''+t.id+'\')">'+
           '<div id="opties-tx-'+t.id+'" style="display:none;margin-top:4px"></div>'+
         '</div>':'';
       var checkedTx=geselecteerdeTransacties[t.id]?' checked':'';
@@ -939,12 +966,19 @@ function renderBankTab(){
     html+=nietGematchteBonnen.map(function(b){
       var koppelVeld=txNietGematcht.length?
         '<div style="padding:0 0 10px">'+
-          '<input type="text" id="zoek-bon-'+b.id+'" placeholder="🔍 Zoek en koppel aan transactie..." style="font-size:12px" oninput="filterKoppelOpties(\'bon\','+b.id+',this.value)">'+
+          '<input type="text" id="zoek-bon-'+b.id+'" placeholder="🔍 Zoek of kies uit de lijst..." style="font-size:12px" oninput="filterKoppelOpties(\'bon\','+b.id+',this.value)" onfocus="toonKoppelOpties(\'bon\','+b.id+')" onblur="verbergKoppelOpties(\'bon\','+b.id+')">'+
           '<div id="opties-bon-'+b.id+'" style="display:none;margin-top:4px"></div>'+
         '</div>':'';
       var gekoppeld=gekoppeldeTransacties(b.id);
-      var voortgang=gekoppeld.length?
-        '<div style="font-size:11px;color:#BA7517;margin-top:2px">Al gekoppeld: '+fmt(gekoppeldTotaal(b.id))+' van '+fmt(b.bedrag)+' ('+gekoppeld.length+' transactie'+(gekoppeld.length!==1?'s':'')+') — vul aan met een volgende:</div>':'';
+      var voortgang;
+      if(b.herhalend){
+        voortgang=gekoppeld.length?
+          '<div style="font-size:11px;color:#0f6e56;margin-top:2px">🔁 Herhalend — al '+gekoppeld.length+'x gekoppeld (totaal '+fmt(gekoppeldTotaal(b.id))+'). Koppel hieronder de volgende afschrijving:</div>':
+          '<div style="font-size:11px;color:#0f6e56;margin-top:2px">🔁 Herhalende post — koppel hieronder de eerste afschrijving:</div>';
+      } else {
+        voortgang=gekoppeld.length?
+          '<div style="font-size:11px;color:#BA7517;margin-top:2px">Al gekoppeld: '+fmt(gekoppeldTotaal(b.id))+' van '+fmt(b.bedrag)+' ('+gekoppeld.length+' transactie'+(gekoppeld.length!==1?'s':'')+') — vul aan met een volgende:</div>':'';
+      }
       return '<div class="bon-row"><div class="bon-info"><div class="bon-name">'+(b.omschrijving||'—')+'</div>'+
         '<div class="bon-meta">'+b.datum+' · '+b.betaald+'</div>'+voortgang+'</div><div class="bon-amt">'+fmt(b.bedrag)+'</div></div>'+koppelVeld;
     }).join('');
@@ -1030,6 +1064,7 @@ function bewerkBon(id){
   document.getElementById('f-btw').value=bon.btw.toFixed(2);
   setCategorieVeld(bon.categorie||'Algemene kosten');
   setBetaaldVeld(bon.betaald||'BUNQ Zakelijk (7361)');
+  document.getElementById('f-herhalend').checked=!!bon.herhalend;
   document.getElementById('f-opmerking').value=bon.opmerking||'';
   document.getElementById('btn-save-sheets').style.display='none';
   document.getElementById('btn-verwijder').style.display='flex';
@@ -1216,6 +1251,7 @@ function showForm(d,pct,err,aiOk){
   document.getElementById('f-btw').value=d.btw;
   setCategorieVeld(d.categorie||'Algemene kosten');
   setBetaaldVeld(d.betaald||'BUNQ Zakelijk (7361)');
+  document.getElementById('f-herhalend').checked=!!d.herhalend;
   document.getElementById('f-opmerking').value=d.opmerking||'';
   document.getElementById('btn-save-sheets').style.display='flex';
   document.getElementById('btn-verwijder').style.display='none';
@@ -1234,6 +1270,7 @@ function getFormData(){
     btw:parseAmt(document.getElementById('f-btw').value),
     categorie:getCategorieWaarde(),
     betaald:getBetaaldWaarde(),
+    herhalend:!!document.getElementById('f-herhalend').checked,
     opmerking:document.getElementById('f-opmerking').value,
     heeftFoto:!!previewSrc,
     id:editId||Date.now()
@@ -1358,6 +1395,10 @@ function matchKolomWaarde(bon){
     return (bon.betaald||'').toLowerCase().indexOf('contant')>=0?'Contant':'Anders ('+(bon.betaald||'')+')';
   }
   var txIds=matchesByBonId[bon.id];
+  if(bon.herhalend){
+    if(txIds&&txIds.length) return 'Herhalend ('+txIds.length+'x gekoppeld, totaal '+fmt(gekoppeldTotaal(bon.id))+')';
+    return 'Herhalend — nog niet gekoppeld';
+  }
   if(txIds&&txIds.length){
     if(isVolledigGematcht(bon)){
       if(txIds.length===1){
