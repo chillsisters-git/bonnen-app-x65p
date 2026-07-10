@@ -692,12 +692,15 @@ function vindKolom(header,mogelijkeNamen){
 }
 // Zoekt specifiek de kolom met de EIGEN rekening (IBAN/rekeningnummer), niet de
 // tegenrekening (dat is de rekening van de ander, niet interessant hiervoor).
+// Spaties worden genegeerd bij het vergelijken, zodat "Rekening nummer" ook
+// overeenkomt met "rekeningnummer".
 function vindEigenRekeningKolom(header){
-  var voorkeur=['iban','rekeningnummer','rekening','account number'];
+  var voorkeur=['iban','rekeningnummer','rekening','accountnumber','account'];
   for(var i=0;i<header.length;i++){
-    if(header[i].indexOf('tegen')>=0) continue;
+    var kop=header[i].replace(/\s/g,'');
+    if(kop.indexOf('tegen')>=0) continue;
     for(var j=0;j<voorkeur.length;j++){
-      if(header[i].indexOf(voorkeur[j])>=0) return i;
+      if(kop.indexOf(voorkeur[j])>=0) return i;
     }
   }
   return -1;
@@ -1040,8 +1043,12 @@ function renderBankTab(){
   var gematchteBonnen=sorteerOpDatumDesc(matchableBonnen.filter(function(b){return isVolledigGematcht(b);}));
   var nietGematchteBonnen=sorteerOpDatumDesc(matchableBonnen.filter(function(b){return !isVolledigGematcht(b);}));
   var txAfschrijvingen=transacties.filter(function(t){
-    return t.type==='af'&&voldoetAanZoek(t.bedrag,t.omschrijving,matchRekening(t.rekening))&&
-      (activeRekeningFilter==='alle'||matchRekening(t.rekening)===activeRekeningFilter);
+    var rekeningNaam=matchRekening(t.rekening);
+    // Een transactie waarvan de rekening niet herkend kon worden (bijv. omdat dit
+    // bankafschrift geen rekeningnummer-kolom bevat) wordt NOOIT verborgen achter een
+    // specifiek rekeningfilter — anders lijkt het net of de data er niet is.
+    var rekeningOk=activeRekeningFilter==='alle'||rekeningNaam===activeRekeningFilter||!rekeningNaam;
+    return t.type==='af'&&voldoetAanZoek(t.bedrag,t.omschrijving,rekeningNaam)&&rekeningOk;
   });
   var txNietGematcht=sorteerOpDatumDesc(txAfschrijvingen.filter(function(t){return !matchesByTxId[t.id]&&!twijfelgevallen[t.id]&&!handmatigTxGematcht[t.id];}));
   var txHandmatigGematcht=sorteerOpDatumDesc(txAfschrijvingen.filter(function(t){return handmatigTxGematcht[t.id];}));
@@ -1065,6 +1072,10 @@ function renderBankTab(){
     html+='<div style="display:flex;gap:14px;font-size:11px;color:#888;margin:-4px 0 12px 2px">'+
       '<span>🧾 = bon (jouw uitgave)</span><span>🏦 = transactie (bankafschrift)</span>'+
     '</div>';
+    var onbekendeRekeningCount=transacties.filter(function(t){return t.type==='af'&&!matchRekening(t.rekening);}).length;
+    if(onbekendeRekeningCount>0){
+      html+='<div class="tip" style="background:#fef3e2">⚠️ <span>'+onbekendeRekeningCount+' transactie'+(onbekendeRekeningCount!==1?'s':'')+' zonder herkenbaar rekeningnummer in dit bankafschrift — die blijven altijd zichtbaar, ook als je hieronder op een specifieke rekening filtert.</span></div>';
+    }
     html+='<div class="q-tabs" style="margin-bottom:1rem">'+
       '<button class="q-tab'+(activeRekeningFilter==='alle'?' active':'')+'" onclick="setRekeningFilter(\'alle\')">Alle rek.</button>'+
       BEKENDE_REKENINGEN.map(function(r){
@@ -1152,7 +1163,7 @@ function renderBankTab(){
         '</div>':'')+
     '</div>';
     html+=txNietGematcht.map(function(t){
-      var koppelVeld=nietGematchteBonnen.length?
+      var koppelVeld=laatsteNietGematchteBonnen.length?
         '<div style="padding:0 0 10px">'+
           '<input type="text" id="zoek-tx-'+t.id+'" placeholder="🔍 Zoek of kies uit de lijst..." style="font-size:12px" oninput="filterKoppelOpties(\'tx\',\''+t.id+'\',this.value)" onfocus="toonKoppelOpties(\'tx\',\''+t.id+'\')" onblur="verbergKoppelOpties(\'tx\',\''+t.id+'\')">'+
           '<div id="opties-tx-'+t.id+'" style="display:none;margin-top:4px"></div>'+
@@ -1196,7 +1207,7 @@ function renderBankTab(){
   } else {
     var dubbeleBonnenBank=vindDubbeleBonnen();
     html+=nietGematchteBonnen.map(function(b){
-      var koppelVeld=txNietGematcht.length?
+      var koppelVeld=laatsteTxNietGematcht.length?
         '<div style="padding:0 0 10px">'+
           '<input type="text" id="zoek-bon-'+b.id+'" placeholder="🔍 Zoek of kies uit de lijst..." style="font-size:12px" oninput="filterKoppelOpties(\'bon\','+b.id+',this.value)" onfocus="toonKoppelOpties(\'bon\','+b.id+')" onblur="verbergKoppelOpties(\'bon\','+b.id+')">'+
           '<div id="opties-bon-'+b.id+'" style="display:none;margin-top:4px"></div>'+
