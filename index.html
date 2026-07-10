@@ -834,11 +834,13 @@ function ontmarkeerBonGematcht(bonId){
 // koppelWeergaveAantal onthoudt per lijstje hoeveel resultaten er al getoond worden,
 // zodat de "Toon meer"-knop verder kan bladeren zonder dat er getypt hoeft te worden.
 var koppelWeergaveAantal={};
+var verbergTimers={}; // containerId -> timeout-id van de pending auto-hide (zie verbergKoppelOpties)
 function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
   var term=(zoektekst||'').toLowerCase().trim();
   var containerId=(kind==='tx'?'opties-tx-':'opties-bon-')+ownId;
   var container=document.getElementById(containerId);
   if(!container) return;
+  if(verbergTimers[containerId]){clearTimeout(verbergTimers[containerId]);delete verbergTimers[containerId];} // annuleer een eventuele pending auto-hide
   if(!behoudWeergave) koppelWeergaveAantal[containerId]=30; // nieuwe zoekterm: begin weer bovenaan
   var bron=kind==='tx'?laatsteNietGematchteBonnen:laatsteTxNietGematcht;
   var alles=bron.slice(); // volledige lijst, ook zonder zoekterm
@@ -857,7 +859,7 @@ function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
   var getoond=treffers.slice(0,aantal);
   var restant=treffers.length-getoond.length;
   var meerKnop=restant>0?
-    '<button class="btw-pct-btn" style="display:block;width:100%;margin-top:2px;font-size:12px;font-weight:500" onmousedown="event.preventDefault()" onclick="toonMeerKoppelOpties(\''+kind+'\',\''+ownId+'\')">↓ + '+restant+' meer tonen</button>':'';
+    '<button class="btw-pct-btn" style="display:block;width:100%;margin-top:2px;font-size:12px;font-weight:500" onclick="toonMeerKoppelOpties(\''+kind+'\',\''+ownId+'\')">↓ + '+restant+' meer tonen</button>':'';
   container.innerHTML=getoond.map(function(item){
     var label=(item.omschrijving||'—')+' · '+fmt(item.bedrag)+' · '+item.datum;
     var onclickAttr=kind==='tx'?
@@ -885,12 +887,14 @@ function toonKoppelOpties(kind,ownId){
   filterKoppelOpties(kind,ownId,input?input.value:'',true);
 }
 // Verbergt de lijst weer nadat het zoekveld focus verliest — met kleine vertraging
-// zodat een klik op een resultaat nog kan worden geregistreerd.
+// zodat een klik op een resultaat (of op "meer tonen") nog kan worden geregistreerd;
+// die klik annuleert deze timer namelijk zelf weer via filterKoppelOpties hierboven.
 function verbergKoppelOpties(kind,ownId){
   var containerId=(kind==='tx'?'opties-tx-':'opties-bon-')+ownId;
-  setTimeout(function(){
+  verbergTimers[containerId]=setTimeout(function(){
     var c=document.getElementById(containerId);
     if(c) c.style.display='none';
+    delete verbergTimers[containerId];
   },200);
 }
 
@@ -1076,6 +1080,7 @@ function renderBankTab(){
   } else if(!nietGematchteBonnen.length){
     html+='<div class="empty">Alle zakelijke bonnen zijn gematcht ✓</div>';
   } else {
+    var dubbeleBonnenBank=vindDubbeleBonnen();
     html+=nietGematchteBonnen.map(function(b){
       var koppelVeld=txNietGematcht.length?
         '<div style="padding:0 0 10px">'+
@@ -1083,6 +1088,7 @@ function renderBankTab(){
           '<div id="opties-bon-'+b.id+'" style="display:none;margin-top:4px"></div>'+
         '</div>':'';
       var gekoppeld=gekoppeldeTransacties(b.id);
+      var dubbelBadgeBank=dubbeleBonnenBank[b.id]?' <span class="badge" style="background:#fdecea;color:#c0392b" title="Zelfde bedrag en datum dicht bij elkaar — check of dit geen dubbele bon is">⚠️ Mogelijk dubbel</span>':'';
       var voortgang;
       if(b.herhalend){
         voortgang=gekoppeld.length?
@@ -1092,11 +1098,15 @@ function renderBankTab(){
         voortgang=gekoppeld.length?
           '<div style="font-size:11px;color:#BA7517;margin-top:2px">Al gekoppeld: '+fmt(gekoppeldTotaal(b.id))+' van '+fmt(b.bedrag)+' ('+gekoppeld.length+' transactie'+(gekoppeld.length!==1?'s':'')+') — vul aan met een volgende:</div>':'';
       }
-      return '<div class="bon-row" style="border-left:3px solid #1D9E75;padding-left:8px"><div class="bon-info"><div class="bon-name">🧾 '+(b.omschrijving||'—')+'</div>'+
+      return '<div class="bon-row" style="border-left:3px solid #1D9E75;padding-left:8px"><div class="bon-info"><div class="bon-name">🧾 '+(b.omschrijving||'—')+dubbelBadgeBank+'</div>'+
         '<div class="bon-meta">'+b.datum+' · '+b.betaald+'</div>'+voortgang+'</div>'+
         '<div style="display:flex;align-items:center;gap:8px;margin-left:8px">'+
           '<div class="bon-amt">'+fmt(b.bedrag)+'</div>'+
-          '<button class="btn-edit" onclick="markeerBonGematcht('+b.id+')" title="Handmatig als gematcht markeren (zonder specifieke transactie te koppelen)">✅</button>'+
+          '<div class="bon-actions">'+
+            '<button class="btn-edit" onclick="markeerBonGematcht('+b.id+')" title="Handmatig als gematcht markeren (zonder specifieke transactie te koppelen)">✅</button>'+
+            '<button class="btn-edit" onclick="bewerkBon('+b.id+')" title="Bon bewerken">✏️</button>'+
+            '<button class="btn-del" onclick="vraagVerwijder('+b.id+')" title="Bon verwijderen">🗑</button>'+
+          '</div>'+
         '</div>'+
       '</div>'+koppelVeld;
     }).join('');
