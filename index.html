@@ -301,6 +301,11 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
 var bonnen=[];
 var activeTab='bonnen';
 var activeKwartaal='alle';
+var activeRekeningFilter='alle'; // 'alle' of één van BEKENDE_REKENINGEN — filtert het tabblad Bankafschrift
+function setRekeningFilter(r){
+  activeRekeningFilter=r;
+  renderBankTab();
+}
 var activeJaar='alle';
 var previewSrc=null;
 var activeBTWpct=21;
@@ -861,6 +866,39 @@ function ontmarkeerBonGematcht(bonId){
 // zodat de "Toon meer"-knop verder kan bladeren zonder dat er getypt hoeft te worden.
 var koppelWeergaveAantal={};
 var verbergTimers={}; // containerId -> timeout-id van de pending auto-hide (zie verbergKoppelOpties)
+var koppelMaandFilter={}; // containerId -> 'MM-JJJJ' (gekozen maand) of null/undefined (alle maanden)
+var MAAND_NAMEN=['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+
+function maandLabel(maandJaar){
+  var p=maandJaar.split('-');
+  return MAAND_NAMEN[parseInt(p[0],10)-1]+" '"+p[1].slice(2);
+}
+
+// Verzamelt alle unieke maanden (MM-JJJJ) die in een lijst voorkomen, nieuwste eerst —
+// gebruikt om de maandknopjes boven de koppel-dropdown te vullen.
+function beschikbareMaanden(lijst){
+  var set={};
+  lijst.forEach(function(item){
+    var d=parseDatumNL(item.datum);
+    if(!d) return;
+    set[pad2(d.getMonth()+1)+'-'+d.getFullYear()]=true;
+  });
+  return Object.keys(set).sort(function(a,b){
+    var pa=a.split('-'),pb=b.split('-');
+    return new Date(pb[1],pb[0]-1,1)-new Date(pa[1],pa[0]-1,1);
+  });
+}
+
+// Kiest (of wist, bij nogmaals klikken) een maandfilter voor één specifieke koppel-lijst.
+function kiesKoppelMaand(kind,ownId,maandJaar){
+  var containerId=(kind==='tx'?'opties-tx-':'opties-bon-')+ownId;
+  koppelMaandFilter[containerId]=(koppelMaandFilter[containerId]===maandJaar)?null:maandJaar;
+  koppelWeergaveAantal[containerId]=30;
+  var inputId=(kind==='tx'?'zoek-tx-':'zoek-bon-')+ownId;
+  var input=document.getElementById(inputId);
+  filterKoppelOpties(kind,ownId,input?input.value:'',true);
+}
+
 function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
   var term=(zoektekst||'').toLowerCase().trim();
   var containerId=(kind==='tx'?'opties-tx-':'opties-bon-')+ownId;
@@ -869,12 +907,20 @@ function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
   if(verbergTimers[containerId]){clearTimeout(verbergTimers[containerId]);delete verbergTimers[containerId];} // annuleer een eventuele pending auto-hide
   if(!behoudWeergave) koppelWeergaveAantal[containerId]=30; // nieuwe zoekterm: begin weer bovenaan
   var bron=kind==='tx'?laatsteNietGematchteBonnen:laatsteTxNietGematcht;
-  var alles=bron.slice(); // volledige lijst, ook zonder zoekterm
+  var alles=bron.slice(); // volledige lijst, ook zonder zoekterm — basis voor de maandknopjes
   var treffers=term?bron.filter(function(item){
     var bedragStr=(item.bedrag||0).toFixed(2);
     var haystack=((item.omschrijving||'')+' '+(item.datum||'')+' '+bedragStr+' '+bedragStr.replace('.',',')).toLowerCase();
     return haystack.indexOf(term)>=0;
   }):alles;
+  var maandActief=koppelMaandFilter[containerId];
+  if(maandActief){
+    treffers=treffers.filter(function(item){
+      var d=parseDatumNL(item.datum);
+      if(!d) return false;
+      return (pad2(d.getMonth()+1)+'-'+d.getFullYear())===maandActief;
+    });
+  }
   // Op datum sorteren (nieuwste bovenaan) — zonder dit stonden ze in willekeurige
   // volgorde (de volgorde waarin ze zijn ingevoerd/ingelezen), lastig scannen.
   treffers=treffers.slice().sort(function(a,b){
@@ -885,8 +931,13 @@ function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
     return db-da;
   });
 
+  var maandChips=beschikbareMaanden(alles).map(function(mj){
+    return '<button class="btw-pct-btn'+(maandActief===mj?' active':'')+'" style="display:inline-block;width:auto;padding:4px 9px;margin:0 4px 4px 0;font-size:11px" onmousedown="event.preventDefault()" onclick="kiesKoppelMaand(\''+kind+'\',\''+ownId+'\',\''+mj+'\')">'+maandLabel(mj)+'</button>';
+  }).join('');
+  var maandRow=maandChips?'<div style="position:sticky;top:0;background:#fff;padding:2px 0 6px;margin-bottom:4px;border-bottom:1px solid #f0f0f0">'+maandChips+'</div>':'';
+
   if(!treffers.length){
-    container.innerHTML='<div style="font-size:12px;color:#888;padding:6px 2px">Geen resultaten</div>';
+    container.innerHTML=maandRow+'<div style="font-size:12px;color:#888;padding:6px 2px">Geen resultaten'+(maandActief?' in '+maandLabel(maandActief):'')+'</div>';
     container.style.cssText='display:block;max-height:320px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:4px;margin-top:4px';
     return;
   }
@@ -895,7 +946,7 @@ function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
   var restant=treffers.length-getoond.length;
   var meerKnop=restant>0?
     '<button class="btw-pct-btn" style="display:block;width:100%;margin-top:2px;font-size:12px;font-weight:500" onclick="toonMeerKoppelOpties(\''+kind+'\',\''+ownId+'\')">↓ + '+restant+' meer tonen</button>':'';
-  container.innerHTML=getoond.map(function(item){
+  container.innerHTML=maandRow+getoond.map(function(item){
     var label=item.datum+' · '+(item.omschrijving||'—')+' · '+fmt(item.bedrag);
     var onclickAttr=kind==='tx'?
       'koppelHandmatig(\''+ownId+'\','+item.id+')':
@@ -983,15 +1034,20 @@ function handleBankFile(input){
 
 function renderBankTab(){
   var el=document.getElementById('tab-content');
-  var matchableBonnen=gefilterdeBonnen().filter(function(b){return BEKENDE_REKENINGEN.indexOf(b.betaald)>=0;});
+  var matchableBonnen=gefilterdeBonnen().filter(function(b){
+    return BEKENDE_REKENINGEN.indexOf(b.betaald)>=0&&(activeRekeningFilter==='alle'||b.betaald===activeRekeningFilter);
+  });
   var gematchteBonnen=sorteerOpDatumDesc(matchableBonnen.filter(function(b){return isVolledigGematcht(b);}));
   var nietGematchteBonnen=sorteerOpDatumDesc(matchableBonnen.filter(function(b){return !isVolledigGematcht(b);}));
-  var txAfschrijvingen=transacties.filter(function(t){return t.type==='af'&&voldoetAanZoek(t.bedrag,t.omschrijving,matchRekening(t.rekening));});
+  var txAfschrijvingen=transacties.filter(function(t){
+    return t.type==='af'&&voldoetAanZoek(t.bedrag,t.omschrijving,matchRekening(t.rekening))&&
+      (activeRekeningFilter==='alle'||matchRekening(t.rekening)===activeRekeningFilter);
+  });
   var txNietGematcht=sorteerOpDatumDesc(txAfschrijvingen.filter(function(t){return !matchesByTxId[t.id]&&!twijfelgevallen[t.id]&&!handmatigTxGematcht[t.id];}));
   var txHandmatigGematcht=sorteerOpDatumDesc(txAfschrijvingen.filter(function(t){return handmatigTxGematcht[t.id];}));
   // Belangrijk: de kandidatenlijst voor het HANDMATIG koppelen (zoekvelden) mag NIET
-  // beïnvloed worden door de zoekbalk bovenaan of het jaar/kwartaal-filter — anders
-  // vind je in het koppel-zoekveld ineens niks meer terug zodra er bovenin gefilterd is.
+  // beïnvloed worden door de zoekbalk bovenaan, het jaar/kwartaal-filter of het
+  // rekeningfilter — anders vind je in het koppel-zoekveld ineens niks meer terug.
   laatsteNietGematchteBonnen=bonnen.filter(function(b){return BEKENDE_REKENINGEN.indexOf(b.betaald)>=0&&!isVolledigGematcht(b);});
   laatsteTxNietGematcht=transacties.filter(function(t){return t.type==='af'&&!matchesByTxId[t.id]&&!twijfelgevallen[t.id]&&!handmatigTxGematcht[t.id];});
 
@@ -1009,11 +1065,22 @@ function renderBankTab(){
     html+='<div style="display:flex;gap:14px;font-size:11px;color:#888;margin:-4px 0 12px 2px">'+
       '<span>🧾 = bon (jouw uitgave)</span><span>🏦 = transactie (bankafschrift)</span>'+
     '</div>';
+    html+='<div class="q-tabs" style="margin-bottom:1rem">'+
+      '<button class="q-tab'+(activeRekeningFilter==='alle'?' active':'')+'" onclick="setRekeningFilter(\'alle\')">Alle rek.</button>'+
+      BEKENDE_REKENINGEN.map(function(r){
+        var kort=r.replace(/\s*\(.*\)/,''); // toont "BUNQ Zakelijk" i.p.v. "BUNQ Zakelijk (7361)" — past beter in het knopje
+        return '<button class="q-tab'+(activeRekeningFilter===r?' active':'')+'" onclick="setRekeningFilter(\''+r+'\')">'+kort+'</button>';
+      }).join('')+
+    '</div>';
   } else {
     html+='<div class="tip">💡 <span>Upload een CSV van het bankafschrift om te checken welke bonnen al zijn afgeschreven</span></div>';
   }
 
-  var twijfelIds=Object.keys(twijfelgevallen).sort(function(txIdA,txIdB){
+  var twijfelIds=Object.keys(twijfelgevallen).filter(function(txId){
+    if(activeRekeningFilter==='alle') return true;
+    var tx=transacties.find(function(t){return t.id===txId;});
+    return tx&&matchRekening(tx.rekening)===activeRekeningFilter;
+  }).sort(function(txIdA,txIdB){
     var txA=transacties.find(function(t){return t.id===txIdA;});
     var txB=transacties.find(function(t){return t.id===txIdB;});
     var da=txA?parseDatumNL(txA.datum):null,db=txB?parseDatumNL(txB.datum):null;
