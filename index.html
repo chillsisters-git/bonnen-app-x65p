@@ -311,6 +311,7 @@ var matchesByBonId={};
 var matchesByTxId={};
 var twijfelgevallen={};
 var handmatigeKoppelingen={}; // txId -> bonId, blijft bewaard
+var genegeerd={}; // txId -> [bonId,...], automatische matches die je zelf hebt ontkoppeld
 var BEKENDE_REKENINGEN=['BUNQ Zakelijk (7361)','VISA (5749)','BUNQ Privé (4183)','ABN Privé (4178)'];
 
 var REKENINGEN=[
@@ -497,16 +498,6 @@ function voldoetAanZoek(bedrag,omschrijving){
   return haystack.indexOf(zoekTerm)>=0;
 }
 
-function lijktOpPersoonsnaam(tekst){
-  if(!tekst) return false;
-  var t=tekst.toLowerCase();
-  var signalen=['dhr.','dhr ','mevr.','mevr ','mevrouw','de heer','mw.','mw ','familie ','fam.'];
-  for(var i=0;i<signalen.length;i++){
-    if(t.indexOf(signalen[i])>=0) return true;
-  }
-  return false;
-}
-
 // ============ BANKAFSCHRIFT-KOPPELING ============
 
 // Badge die op elke bon-regel getoond wordt met de matching-status
@@ -517,7 +508,7 @@ function bankBadge(bon){
     return ' · <span class="badge badge-anders">'+tekst+'</span>';
   }
   if(matchesByBonId[bon.id]){
-    return ' · <span class="badge badge-zakelijk">🔗 Gematcht</span>';
+    return ' · <span class="badge badge-zakelijk">🔗 Gematcht</span> <span onclick="event.stopPropagation();ontkoppelMatch('+bon.id+')" style="cursor:pointer;color:#c0392b;font-size:11px" title="Ontkoppelen">✕</span>';
   }
   if(transacties.length){
     return ' · <span class="badge badge-prive">⚠️ Nog niet gematcht</span>';
@@ -543,10 +534,8 @@ function pad2(n){n=''+n;return n.length<2?'0'+n:n;}
 
 // CSV-parsing — werkt met de meest voorkomende NL-bankformaten (ABN, ING, BUNQ, Revolut)
 function detectDelimiter(line){
-  var tab=(line.match(/\t/g)||[]).length;
   var semi=(line.match(/;/g)||[]).length;
   var comma=(line.match(/,/g)||[]).length;
-  if(tab>=semi&&tab>=comma&&tab>0) return '\t';
   return semi>=comma?';':',';
 }
 function splitCsvLine(line,delim){
@@ -589,9 +578,9 @@ function parseBankCSV(text){
   if(!lines.length) return [];
   var delim=detectDelimiter(lines[0]);
   var header=splitCsvLine(lines[0],delim).map(function(h){return h.trim().toLowerCase();});
-  var idxDatum=vindKolom(header,['transactiedatum','datum','date','completed date','started date','voltooid op','gestart op']);
+  var idxDatum=vindKolom(header,['transactiedatum','datum','date','completed date','started date']);
   var idxBedrag=vindKolom(header,['bedrag (eur)','bedrag','amount']);
-  var idxOmschrijving=vindKolom(header,['naam / omschrijving','omschrijving','beschrijving','naam tegenpartij','description','mededelingen']);
+  var idxOmschrijving=vindKolom(header,['naam / omschrijving','omschrijving','naam tegenpartij','description','mededelingen']);
   var idxAfBij=vindKolom(header,['af bij','af/bij']);
   var result=[];
   for(var r=1;r<lines.length;r++){
@@ -606,15 +595,12 @@ function parseBankCSV(text){
       type=bedragRaw<0?'af':'bij';
     }
     if(!datum) continue;
-    if(type!=='af') continue; // bijschrijvingen worden bewust niet ingelezen — niet relevant én bevat vaak namen van derden (privacy)
-    var omschr=idxOmschrijving>=0?(cols[idxOmschrijving]||'').trim():'';
     result.push({
       id:'tx'+r+'-'+Date.now(),
       datum:datum,
       bedrag:Math.abs(bedragRaw),
       type:type,
-      omschrijving:omschr,
-      mogelijkPersoon:lijktOpPersoonsnaam(omschr)
+      omschrijving:idxOmschrijving>=0?(cols[idxOmschrijving]||'').trim():''
     });
   }
   return result;
@@ -641,8 +627,10 @@ function matchTransacties(){
   transacties.forEach(function(tx){
     if(tx.type!=='af') return;
     if(matchesByTxId[tx.id]) return; // al (handmatig) gekoppeld
+    var genegeerdeBonIds=genegeerd[tx.id]||[];
     var kandidaten=beschikbareBonnen.filter(function(b){
       if(matchesByBonId[b.id]) return false;
+      if(genegeerdeBonIds.indexOf(b.id)>=0) return false; // eerder handmatig ontkoppeld, niet opnieuw automatisch koppelen
       if(Math.abs(b.bedrag-tx.bedrag)>0.01) return false;
       var verschil=dagVerschil(b.datum,tx.datum);
       return verschil!==null&&verschil<=3;
@@ -660,6 +648,23 @@ function matchTransacties(){
 
 function koppelHandmatig(txId,bonId){
   handmatigeKoppelingen[txId]=bonId;
+  matchTransacties();
+  bewaarTransacties();
+  renderBankTab();
+  if(activeTab==='bonnen') renderTab();
+}
+
+// Ontkoppelt een bestaande match (automatisch of handmatig). Bij een automatische
+// match wordt de combinatie onthouden zodat hij niet meteen weer terugkomt.
+function ontkoppelMatch(bonId){
+  var txId=matchesByBonId[bonId];
+  if(!txId) return;
+  if(handmatigeKoppelingen[txId]===bonId){
+    delete handmatigeKoppelingen[txId];
+  } else {
+    if(!genegeerd[txId]) genegeerd[txId]=[];
+    if(genegeerd[txId].indexOf(bonId)<0) genegeerd[txId].push(bonId);
+  }
   matchTransacties();
   bewaarTransacties();
   renderBankTab();
@@ -710,11 +715,8 @@ function renderBankTab(){
   }
 
   if(transacties.length){
-    var aantalWaarschuwingen=transacties.filter(function(t){return t.mogelijkPersoon;}).length;
     html+='<div class="card">'+gematchteBonnen.length+' van de '+matchableBonnen.length+' zakelijke bonnen gematcht met het bankafschrift'+
-      '<div style="font-size:11px;color:#888;margin-top:4px">'+txAfschrijvingen.length+' afschrijvingen ingelezen</div>'+
-      (aantalWaarschuwingen?'<div style="font-size:11px;color:#854f0b;margin-top:4px">⚠️ '+aantalWaarschuwingen+' omschrijving(en) lijken op een persoonsnaam — controleer deze</div>':'')+
-      '</div>';
+      '<div style="font-size:11px;color:#888;margin-top:4px">'+txAfschrijvingen.length+' afschrijvingen ingelezen</div></div>';
   } else {
     html+='<div class="tip">💡 <span>Upload een CSV van het bankafschrift om te checken welke bonnen al zijn afgeschreven</span></div>';
   }
@@ -730,9 +732,20 @@ function renderBankTab(){
         if(!b) return '';
         return '<button class="btw-pct-btn" style="display:block;width:100%;margin-bottom:6px;text-align:left" onclick="koppelHandmatig(\''+txId+'\','+bonId+')">'+(b.omschrijving||'—')+' · '+fmt(b.bedrag)+' · '+b.datum+'</button>';
       }).join('');
-      return '<div class="card"><div class="bon-name" style="margin-bottom:4px">'+(tx.omschrijving||'—')+' · '+tx.datum+' · '+fmt(tx.bedrag)+'</div>'+
+      return '<div class="card"><div style="margin-bottom:4px;font-size:13px;font-weight:600;white-space:normal;overflow:visible;text-overflow:clip;word-break:break-word">'+(tx.omschrijving||'—')+'<br><span style="font-weight:400;color:#888;font-size:12px">'+tx.datum+' · '+fmt(tx.bedrag)+'</span></div>'+
         '<div style="font-size:11px;color:#888;margin-bottom:8px">Meerdere bonnen passen — kies de juiste:</div>'+
         opties+'</div>';
+    }).join('');
+  }
+
+  if(gematchteBonnen.length){
+    html+='<div class="section-title">Gematchte bonnen ('+gematchteBonnen.length+')</div>';
+    html+=gematchteBonnen.map(function(b){
+      var tx=transacties.find(function(t){return t.id===matchesByBonId[b.id];});
+      return '<div class="bon-row"><div class="bon-info"><div class="bon-name">'+(b.omschrijving||'—')+'</div>'+
+        '<div class="bon-meta">'+b.datum+' · '+fmt(b.bedrag)+(tx?' · afgeschreven '+tx.datum:'')+'</div></div>'+
+        '<div class="bon-actions"><button class="btn-del" onclick="ontkoppelMatch('+b.id+')" title="Ontkoppelen">🔓 Ontkoppel</button></div>'+
+      '</div>';
     }).join('');
   }
 
@@ -743,18 +756,21 @@ function renderBankTab(){
     html+='<div class="empty">Alle afschrijvingen hebben een bon ✓</div>';
   } else {
     html+=txNietGematcht.map(function(t){
-      var waarschuwing=t.mogelijkPersoon?' · <span class="badge badge-prive">⚠️ Mogelijk persoonsnaam</span>':'';
+      var bonOpties=nietGematchteBonnen.map(function(b){
+        return '<option value="'+b.id+'">'+(b.omschrijving||'—')+' · '+fmt(b.bedrag)+' · '+b.datum+'</option>';
+      }).join('');
+      var koppelVeld=nietGematchteBonnen.length?
+        '<div style="padding:0 0 10px"><select onchange="if(this.value)koppelHandmatig(\''+t.id+'\',parseInt(this.value));this.value=\'\';" style="font-size:12px"><option value="">🔗 Koppel handmatig aan bon...</option>'+bonOpties+'</select></div>':'';
       return '<div class="bon-row"><div class="bon-info"><div class="bon-name">'+(t.omschrijving||'—')+'</div>'+
-        '<div class="bon-meta">'+t.datum+waarschuwing+'</div></div>'+
+        '<div class="bon-meta">'+t.datum+'</div></div>'+
         '<div style="display:flex;align-items:center;gap:8px;margin-left:8px">'+
           '<div class="bon-amt">'+fmt(t.bedrag)+'</div>'+
           '<div class="bon-actions">'+
             '<button class="btn-edit" onclick="bewerkTransactieOmschrijving(\''+t.id+'\')" title="Omschrijving aanpassen">✏️</button>'+
             '<button class="btn-edit" onclick="maakBonVanTransactie(\''+t.id+'\')" title="Maak hier een bon van">➕</button>'+
-            '<button class="btn-del" onclick="verwijderTransactie(\''+t.id+'\')" title="Verwijderen">🗑</button>'+
           '</div>'+
         '</div>'+
-      '</div>';
+      '</div>'+koppelVeld;
     }).join('');
   }
 
@@ -779,19 +795,7 @@ function bewerkTransactieOmschrijving(txId){
   var nieuw=prompt('Omschrijving aanpassen (bijv. de winkel die je herkent):',tx.omschrijving||'');
   if(nieuw===null) return;
   tx.omschrijving=nieuw.trim();
-  tx.mogelijkPersoon=lijktOpPersoonsnaam(tx.omschrijving);
-  bewaarTransacties();
   renderBankTab();
-}
-
-function verwijderTransactie(txId){
-  if(!confirm('Deze transactie verwijderen uit de lijst? Dit kan niet ongedaan gemaakt worden.')) return;
-  transacties=transacties.filter(function(t){return t.id!==txId;});
-  delete handmatigeKoppelingen[txId];
-  matchTransacties();
-  bewaarTransacties();
-  renderBankTab();
-  if(activeTab==='bonnen') renderTab();
 }
 
 function maakBonVanTransactie(txId){
@@ -1165,6 +1169,7 @@ function laadTransacties(){
   fetch('/api/transacties').then(function(res){return res.json();}).then(function(data){
     transacties=data.transacties||[];
     handmatigeKoppelingen=data.handmatig||{};
+    genegeerd=data.genegeerd||{};
     matchTransacties();
     if(activeTab==='bank') renderBankTab();
   }).catch(function(){});
@@ -1174,7 +1179,7 @@ function bewaarTransacties(){
   fetch('/api/transacties',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({transacties:transacties,handmatig:handmatigeKoppelingen})
+    body:JSON.stringify({transacties:transacties,handmatig:handmatigeKoppelingen,genegeerd:genegeerd})
   }).catch(function(e){console.error('Transacties opslaan mislukt',e);});
 }
 
