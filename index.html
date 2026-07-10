@@ -781,8 +781,13 @@ function renderBankTab(){
     html+='<div class="empty">Alle zakelijke bonnen zijn gematcht ✓</div>';
   } else {
     html+=nietGematchteBonnen.map(function(b){
+      var txOpties=txNietGematcht.map(function(t){
+        return '<option value="'+t.id+'">'+(t.omschrijving||'—')+' · '+fmt(t.bedrag)+' · '+t.datum+'</option>';
+      }).join('');
+      var koppelVeld=txNietGematcht.length?
+        '<div style="padding:0 0 10px"><select onchange="if(this.value)koppelHandmatig(this.value,'+b.id+');this.value=\'\';" style="font-size:12px"><option value="">🔗 Koppel aan transactie...</option>'+txOpties+'</select></div>':'';
       return '<div class="bon-row"><div class="bon-info"><div class="bon-name">'+(b.omschrijving||'—')+'</div>'+
-        '<div class="bon-meta">'+b.datum+' · '+b.betaald+'</div></div><div class="bon-amt">'+fmt(b.bedrag)+'</div></div>';
+        '<div class="bon-meta">'+b.datum+' · '+b.betaald+'</div></div><div class="bon-amt">'+fmt(b.bedrag)+'</div></div>'+koppelVeld;
     }).join('');
   }
 
