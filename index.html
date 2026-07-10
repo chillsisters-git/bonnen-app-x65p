@@ -1,4 +1,3 @@
-
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
@@ -601,7 +600,7 @@ function bankBadge(bon){
 // Datum-hulpfuncties (bonnen gebruiken DD-MM-YYYY)
 function parseDatumNL(d){
   if(!d) return null;
-  var p=d.split('-');
+  var p=(''+d).trim().split(/[-\/]/); // ondersteunt zowel "-" als "/" als scheidingsteken
   if(p.length!==3) return null;
   var jaar=parseInt(p[2],10),maand=parseInt(p[1],10),dag=parseInt(p[0],10);
   if(!jaar||!maand||!dag) return null;
