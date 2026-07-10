@@ -831,11 +831,15 @@ function ontmarkeerBonGematcht(bonId){
 
 // Wordt gebruikt door de zoekvelden bij handmatig koppelen (eigen implementatie, geen
 // <datalist> — die wordt door mobiele Safari niet ondersteund en toont dan geen suggesties).
-function filterKoppelOpties(kind,ownId,zoektekst){
+// koppelWeergaveAantal onthoudt per lijstje hoeveel resultaten er al getoond worden,
+// zodat de "Toon meer"-knop verder kan bladeren zonder dat er getypt hoeft te worden.
+var koppelWeergaveAantal={};
+function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
   var term=(zoektekst||'').toLowerCase().trim();
   var containerId=(kind==='tx'?'opties-tx-':'opties-bon-')+ownId;
   var container=document.getElementById(containerId);
   if(!container) return;
+  if(!behoudWeergave) koppelWeergaveAantal[containerId]=30; // nieuwe zoekterm: begin weer bovenaan
   var bron=kind==='tx'?laatsteNietGematchteBonnen:laatsteTxNietGematcht;
   var alles=bron.slice(); // volledige lijst, ook zonder zoekterm
   var treffers=term?bron.filter(function(item){
@@ -846,26 +850,39 @@ function filterKoppelOpties(kind,ownId,zoektekst){
 
   if(!treffers.length){
     container.innerHTML='<div style="font-size:12px;color:#888;padding:6px 2px">Geen resultaten</div>';
-    container.style.cssText='display:block;max-height:220px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:4px;margin-top:4px';
+    container.style.cssText='display:block;max-height:320px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:4px;margin-top:4px';
     return;
   }
-  var getoond=treffers.slice(0,30);
-  var meerNotitie=treffers.length>30?'<div style="font-size:11px;color:#888;padding:4px 2px">+ '+(treffers.length-30)+' meer — typ om te filteren</div>':'';
+  var aantal=koppelWeergaveAantal[containerId]||30;
+  var getoond=treffers.slice(0,aantal);
+  var restant=treffers.length-getoond.length;
+  var meerKnop=restant>0?
+    '<button class="btw-pct-btn" style="display:block;width:100%;margin-top:2px;font-size:12px;font-weight:500" onmousedown="event.preventDefault()" onclick="toonMeerKoppelOpties(\''+kind+'\',\''+ownId+'\')">↓ + '+restant+' meer tonen</button>':'';
   container.innerHTML=getoond.map(function(item){
     var label=(item.omschrijving||'—')+' · '+fmt(item.bedrag)+' · '+item.datum;
     var onclickAttr=kind==='tx'?
       'koppelHandmatig(\''+ownId+'\','+item.id+')':
       'koppelHandmatig(\''+item.id+'\','+ownId+')';
     return '<button class="btw-pct-btn" style="display:block;width:100%;margin-bottom:4px;text-align:left;font-size:12px" onclick="'+onclickAttr+'">'+label+'</button>';
-  }).join('')+meerNotitie;
-  container.style.cssText='display:block;max-height:220px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:4px;margin-top:4px';
+  }).join('')+meerKnop;
+  container.style.cssText='display:block;max-height:320px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:4px;margin-top:4px';
+}
+
+// Breidt de weergegeven lijst uit met nog eens 30 resultaten, zonder dat de zoekterm
+// hoeft te veranderen — reageert op de "Toon meer"-knop onderaan de lijst.
+function toonMeerKoppelOpties(kind,ownId){
+  var containerId=(kind==='tx'?'opties-tx-':'opties-bon-')+ownId;
+  koppelWeergaveAantal[containerId]=(koppelWeergaveAantal[containerId]||30)+30;
+  var inputId=(kind==='tx'?'zoek-tx-':'zoek-bon-')+ownId;
+  var input=document.getElementById(inputId);
+  filterKoppelOpties(kind,ownId,input?input.value:'',true);
 }
 
 // Toont de volledige (nog ongefilterde) lijst zodra het zoekveld focus krijgt.
 function toonKoppelOpties(kind,ownId){
   var inputId=(kind==='tx'?'zoek-tx-':'zoek-bon-')+ownId;
   var input=document.getElementById(inputId);
-  filterKoppelOpties(kind,ownId,input?input.value:'');
+  filterKoppelOpties(kind,ownId,input?input.value:'',true);
 }
 // Verbergt de lijst weer nadat het zoekveld focus verliest — met kleine vertraging
 // zodat een klik op een resultaat nog kan worden geregistreerd.
@@ -950,6 +967,9 @@ function renderBankTab(){
   if(transacties.length){
     html+='<div class="card">'+gematchteBonnen.length+' van de '+matchableBonnen.length+' zakelijke bonnen gematcht met het bankafschrift'+
       '<div style="font-size:11px;color:#888;margin-top:4px">'+txAfschrijvingen.length+' afschrijvingen ingelezen</div></div>';
+    html+='<div style="display:flex;gap:14px;font-size:11px;color:#888;margin:-4px 0 12px 2px">'+
+      '<span>🧾 = bon (jouw uitgave)</span><span>🏦 = transactie (bankafschrift)</span>'+
+    '</div>';
   } else {
     html+='<div class="tip">💡 <span>Upload een CSV van het bankafschrift om te checken welke bonnen al zijn afgeschreven</span></div>';
   }
@@ -963,9 +983,10 @@ function renderBankTab(){
       var opties=twijfelgevallen[txId].map(function(bonId){
         var b=bonnen.find(function(bb){return bb.id===bonId;});
         if(!b) return '';
-        return '<button class="btw-pct-btn" style="display:block;width:100%;margin-bottom:6px;text-align:left" onclick="koppelHandmatig(\''+txId+'\','+bonId+')">'+(b.omschrijving||'—')+' · '+fmt(b.bedrag)+' · '+b.datum+'</button>';
+        return '<button class="btw-pct-btn" style="display:block;width:100%;margin-bottom:6px;text-align:left" onclick="koppelHandmatig(\''+txId+'\','+bonId+')">🧾 '+(b.omschrijving||'—')+' · '+fmt(b.bedrag)+' · '+b.datum+'</button>';
       }).join('');
-      return '<div class="card"><div style="margin-bottom:4px;font-size:13px;font-weight:600;white-space:normal;overflow:visible;text-overflow:clip;word-break:break-word">'+(tx.omschrijving||'—')+'<br><span style="font-weight:400;color:#888;font-size:12px">'+tx.datum+' · '+fmt(tx.bedrag)+(tx.rekening?' · rek. ...'+tx.rekening:'')+'</span></div>'+
+      return '<div class="card" style="border-left:3px solid #2f6fed">'+
+        '<div style="margin-bottom:4px;font-size:13px;font-weight:600;white-space:normal;overflow:visible;text-overflow:clip;word-break:break-word">🏦 '+(tx.omschrijving||'—')+'<br><span style="font-weight:400;color:#888;font-size:12px">'+tx.datum+' · '+fmt(tx.bedrag)+(tx.rekening?' · rek. ...'+tx.rekening:'')+'</span></div>'+
         '<div style="font-size:11px;color:#888;margin-bottom:8px">Meerdere bonnen passen — kies de juiste:</div>'+
         opties+'</div>';
     }).join('');
@@ -976,7 +997,7 @@ function renderBankTab(){
     html+=gematchteBonnen.map(function(b){
       var txs=gekoppeldeTransacties(b.id);
       if(!txs.length&&b.handmatigGematcht){
-        return '<div class="card"><div class="bon-name" style="margin-bottom:2px">'+(b.omschrijving||'—')+'</div>'+
+        return '<div class="card" style="border-left:3px solid #1D9E75"><div class="bon-name" style="margin-bottom:2px">🧾 '+(b.omschrijving||'—')+'</div>'+
           '<div style="font-size:11px;color:#888;margin-bottom:6px">'+b.datum+' · bonbedrag '+fmt(b.bedrag)+'</div>'+
           '<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#0f6e56">'+
             '<span>✅ Handmatig als gematcht gemarkeerd</span>'+
@@ -985,11 +1006,11 @@ function renderBankTab(){
       }
       var txRegels=txs.map(function(tx){
         return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12px;color:#555">'+
-          '<span>'+tx.datum+' · '+fmt(tx.bedrag)+(tx.omschrijving?' · '+tx.omschrijving:'')+(tx.rekening?' · rek. ...'+tx.rekening:'')+'</span>'+
+          '<span>🏦 '+tx.datum+' · '+fmt(tx.bedrag)+(tx.omschrijving?' · '+tx.omschrijving:'')+(tx.rekening?' · rek. ...'+tx.rekening:'')+'</span>'+
           '<button class="btn-del" style="padding:2px 6px;font-size:11px" onclick="ontkoppelMatch('+b.id+',\''+tx.id+'\')" title="Deze koppeling ontkoppelen">🔓</button>'+
         '</div>';
       }).join('');
-      return '<div class="card"><div class="bon-name" style="margin-bottom:2px">'+(b.omschrijving||'—')+'</div>'+
+      return '<div class="card" style="border-left:3px solid #1D9E75"><div class="bon-name" style="margin-bottom:2px">🧾 '+(b.omschrijving||'—')+'</div>'+
         '<div style="font-size:11px;color:#888;margin-bottom:6px">'+b.datum+' · bonbedrag '+fmt(b.bedrag)+(txs.length>1?' · '+txs.length+' transacties':'')+'</div>'+
         txRegels+
       '</div>';
@@ -1019,9 +1040,9 @@ function renderBankTab(){
           '<div id="opties-tx-'+t.id+'" style="display:none;margin-top:4px"></div>'+
         '</div>':'';
       var checkedTx=geselecteerdeTransacties[t.id]?' checked':'';
-      return '<div class="bon-row">'+
+      return '<div class="bon-row" style="border-left:3px solid #2f6fed;padding-left:8px">'+
         '<input type="checkbox" style="margin-right:8px;flex:none;width:auto" onclick="toggleTransactieSelectie(\''+t.id+'\')"'+checkedTx+'>'+
-        '<div class="bon-info"><div class="bon-name">'+(t.omschrijving||'—')+'</div>'+
+        '<div class="bon-info"><div class="bon-name">🏦 '+(t.omschrijving||'—')+'</div>'+
         '<div class="bon-meta">'+t.datum+(t.rekening?' · rek. ...'+t.rekening:'')+'</div></div>'+
         '<div style="display:flex;align-items:center;gap:8px;margin-left:8px">'+
           '<div class="bon-amt">'+fmt(t.bedrag)+'</div>'+
@@ -1039,7 +1060,7 @@ function renderBankTab(){
   if(txHandmatigGematcht.length){
     html+='<div class="section-title">Handmatig gematcht — zonder bon gekoppeld ('+txHandmatigGematcht.length+')</div>';
     html+=txHandmatigGematcht.map(function(t){
-      return '<div class="bon-row"><div class="bon-info"><div class="bon-name">'+(t.omschrijving||'—')+'</div>'+
+      return '<div class="bon-row" style="border-left:3px solid #2f6fed;padding-left:8px"><div class="bon-info"><div class="bon-name">🏦 '+(t.omschrijving||'—')+'</div>'+
         '<div class="bon-meta">'+t.datum+(t.rekening?' · rek. ...'+t.rekening:'')+' · <span class="badge badge-zakelijk">✅ Handmatig gematcht</span></div></div>'+
         '<div style="display:flex;align-items:center;gap:8px;margin-left:8px">'+
           '<div class="bon-amt">'+fmt(t.bedrag)+'</div>'+
@@ -1071,7 +1092,7 @@ function renderBankTab(){
         voortgang=gekoppeld.length?
           '<div style="font-size:11px;color:#BA7517;margin-top:2px">Al gekoppeld: '+fmt(gekoppeldTotaal(b.id))+' van '+fmt(b.bedrag)+' ('+gekoppeld.length+' transactie'+(gekoppeld.length!==1?'s':'')+') — vul aan met een volgende:</div>':'';
       }
-      return '<div class="bon-row"><div class="bon-info"><div class="bon-name">'+(b.omschrijving||'—')+'</div>'+
+      return '<div class="bon-row" style="border-left:3px solid #1D9E75;padding-left:8px"><div class="bon-info"><div class="bon-name">🧾 '+(b.omschrijving||'—')+'</div>'+
         '<div class="bon-meta">'+b.datum+' · '+b.betaald+'</div>'+voortgang+'</div>'+
         '<div style="display:flex;align-items:center;gap:8px;margin-left:8px">'+
           '<div class="bon-amt">'+fmt(b.bedrag)+'</div>'+
