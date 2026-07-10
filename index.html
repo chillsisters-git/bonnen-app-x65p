@@ -312,6 +312,8 @@ var matchesByTxId={};
 var twijfelgevallen={};
 var handmatigeKoppelingen={}; // txId -> bonId, blijft bewaard
 var genegeerd={}; // txId -> [bonId,...], automatische matches die je zelf hebt ontkoppeld
+var laatsteNietGematchteBonnen=[]; // voor de zoekfunctie bij handmatig koppelen
+var laatsteTxNietGematcht=[]; // voor de zoekfunctie bij handmatig koppelen
 var BEKENDE_REKENINGEN=['BUNQ Zakelijk (7361)','VISA (5749)','BUNQ Privé (4183)','ABN Privé (4178)'];
 
 var REKENINGEN=[
@@ -680,17 +682,38 @@ function koppelHandmatig(txId,bonId){
   if(activeTab==='bonnen') renderTab();
 }
 
-// Wordt gebruikt door de zoekvelden (met datalist) bij handmatig koppelen.
-// De gekozen tekst eindigt op "(#id)" — dat halen we eruit om te weten welke bon/transactie is gekozen.
-function koppelViaLabel(kind,ownId,label){
-  var m=(label||'').match(/\(#([^)]+)\)\s*$/);
-  if(!m) return; // geen geldige keuze uit de lijst (nog aan het typen, of niets gevonden)
-  var targetId=m[1];
-  if(kind==='tx'){
-    koppelHandmatig(ownId,parseInt(targetId,10));
-  } else {
-    koppelHandmatig(targetId,ownId);
+// Wordt gebruikt door de zoekvelden bij handmatig koppelen (eigen implementatie, geen
+// <datalist> — die wordt door mobiele Safari niet ondersteund en toont dan geen suggesties).
+function filterKoppelOpties(kind,ownId,zoektekst){
+  var term=(zoektekst||'').toLowerCase().trim();
+  var containerId=(kind==='tx'?'opties-tx-':'opties-bon-')+ownId;
+  var container=document.getElementById(containerId);
+  if(!container) return;
+  if(!term){
+    container.style.display='none';
+    container.innerHTML='';
+    return;
   }
+  var bron=kind==='tx'?laatsteNietGematchteBonnen:laatsteTxNietGematcht;
+  var treffers=bron.filter(function(item){
+    var bedragStr=(item.bedrag||0).toFixed(2);
+    var haystack=((item.omschrijving||'')+' '+(item.datum||'')+' '+bedragStr+' '+bedragStr.replace('.',',')).toLowerCase();
+    return haystack.indexOf(term)>=0;
+  }).slice(0,8);
+
+  if(!treffers.length){
+    container.innerHTML='<div style="font-size:12px;color:#888;padding:6px 2px">Geen resultaten</div>';
+    container.style.display='block';
+    return;
+  }
+  container.innerHTML=treffers.map(function(item){
+    var label=(item.omschrijving||'—')+' · '+fmt(item.bedrag)+' · '+item.datum;
+    var onclickAttr=kind==='tx'?
+      'koppelHandmatig(\''+ownId+'\','+item.id+')':
+      'koppelHandmatig(\''+item.id+'\','+ownId+')';
+    return '<button class="btw-pct-btn" style="display:block;width:100%;margin-bottom:4px;text-align:left;font-size:12px" onclick="'+onclickAttr+'">'+label+'</button>';
+  }).join('');
+  container.style.display='block';
 }
 
 // Ontkoppelt één specifieke transactie van een bon (nodig omdat een bon meerdere
@@ -748,6 +771,8 @@ function renderBankTab(){
   var nietGematchteBonnen=matchableBonnen.filter(function(b){return !isVolledigGematcht(b);});
   var txAfschrijvingen=transacties.filter(function(t){return t.type==='af'&&voldoetAanZoek(t.bedrag,t.omschrijving);});
   var txNietGematcht=txAfschrijvingen.filter(function(t){return !matchesByTxId[t.id]&&!twijfelgevallen[t.id];});
+  laatsteNietGematchteBonnen=nietGematchteBonnen;
+  laatsteTxNietGematcht=txNietGematcht;
 
   var html='';
   html+='<input type="file" id="bank-file-input" accept=".csv" style="display:none" onchange="handleBankFile(this)">';
@@ -805,14 +830,10 @@ function renderBankTab(){
     html+='<div class="empty">Alle afschrijvingen hebben een bon ✓</div>';
   } else {
     html+=txNietGematcht.map(function(t){
-      var datalistId='dl-tx-'+t.id;
-      var bonOpties=nietGematchteBonnen.map(function(b){
-        return '<option value="'+(b.omschrijving||'—')+' · '+fmt(b.bedrag)+' · '+b.datum+' (#'+b.id+')">';
-      }).join('');
       var koppelVeld=nietGematchteBonnen.length?
         '<div style="padding:0 0 10px">'+
-          '<input list="'+datalistId+'" placeholder="🔍 Zoek en koppel aan bon..." style="font-size:12px" onchange="koppelViaLabel(\'tx\',\''+t.id+'\',this.value);this.value=\'\';">'+
-          '<datalist id="'+datalistId+'">'+bonOpties+'</datalist>'+
+          '<input type="text" id="zoek-tx-'+t.id+'" placeholder="🔍 Zoek en koppel aan bon..." style="font-size:12px" oninput="filterKoppelOpties(\'tx\',\''+t.id+'\',this.value)">'+
+          '<div id="opties-tx-'+t.id+'" style="display:none;margin-top:4px"></div>'+
         '</div>':'';
       return '<div class="bon-row"><div class="bon-info"><div class="bon-name">'+(t.omschrijving||'—')+'</div>'+
         '<div class="bon-meta">'+t.datum+'</div></div>'+
@@ -835,14 +856,10 @@ function renderBankTab(){
     html+='<div class="empty">Alle zakelijke bonnen zijn gematcht ✓</div>';
   } else {
     html+=nietGematchteBonnen.map(function(b){
-      var datalistId='dl-bon-'+b.id;
-      var txOpties=txNietGematcht.map(function(t){
-        return '<option value="'+(t.omschrijving||'—')+' · '+fmt(t.bedrag)+' · '+t.datum+' (#'+t.id+')">';
-      }).join('');
       var koppelVeld=txNietGematcht.length?
         '<div style="padding:0 0 10px">'+
-          '<input list="'+datalistId+'" placeholder="🔍 Zoek en koppel aan transactie..." style="font-size:12px" onchange="koppelViaLabel(\'bon\','+b.id+',this.value);this.value=\'\';">'+
-          '<datalist id="'+datalistId+'">'+txOpties+'</datalist>'+
+          '<input type="text" id="zoek-bon-'+b.id+'" placeholder="🔍 Zoek en koppel aan transactie..." style="font-size:12px" oninput="filterKoppelOpties(\'bon\','+b.id+',this.value)">'+
+          '<div id="opties-bon-'+b.id+'" style="display:none;margin-top:4px"></div>'+
         '</div>':'';
       var gekoppeld=gekoppeldeTransacties(b.id);
       var voortgang=gekoppeld.length?
