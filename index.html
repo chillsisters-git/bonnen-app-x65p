@@ -1,3 +1,4 @@
+
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
@@ -480,6 +481,9 @@ function goBack(){editId=null;setScreen('overzicht');}
 function setTab(t){
   activeTab=t;
   ['bonnen','cat','bank'].forEach(function(x){document.getElementById('tab-'+x).classList.toggle('active',x===t);});
+  zoekTerm='';
+  var zoekInput=document.getElementById('zoek-input');
+  if(zoekInput) zoekInput.value='';
   renderTab();
 }
 
@@ -609,6 +613,18 @@ function dagVerschil(d1,d2){
   return Math.abs((a-b)/86400000);
 }
 function pad2(n){n=''+n;return n.length<2?'0'+n:n;}
+
+// Sorteert een lijst met bonnen/transacties op datum, nieuwste eerst — items zonder
+// (geldige) datum komen onderaan terecht i.p.v. dat de sortering breekt.
+function sorteerOpDatumDesc(lijst){
+  return lijst.slice().sort(function(a,b){
+    var da=parseDatumNL(a.datum),db=parseDatumNL(b.datum);
+    if(!da&&!db) return 0;
+    if(!da) return 1;
+    if(!db) return -1;
+    return db-da;
+  });
+}
 
 // Spoort bonnen op die mogelijk per ongeluk dubbel zijn geüpload: (bijna) hetzelfde
 // bedrag én een datum die dicht bij elkaar ligt (binnen 3 dagen). Retourneert een
@@ -808,6 +824,17 @@ function ontmarkeerTransactieGematcht(txId){
   renderBankTab();
 }
 
+// Markeert alle GESELECTEERDE transacties (via de checkboxes / "Selecteer alles") in
+// één keer als handmatig gematcht — handig bij bijv. 12 losse leaseafschrijvingen.
+function markeerGeselecteerdeTransactiesGematcht(){
+  Object.keys(geselecteerdeTransacties).forEach(function(id){
+    handmatigTxGematcht[id]=true;
+  });
+  geselecteerdeTransacties={};
+  bewaarTransacties();
+  renderBankTab();
+}
+
 // Handmatig een BON als "gematcht" markeren, ongeacht of er een passende transactie
 // gevonden is — voor dezelfde situatie maar dan vanuit de bonnenkant bekeken.
 function markeerBonGematcht(bonId){
@@ -849,6 +876,15 @@ function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
     var haystack=((item.omschrijving||'')+' '+(item.datum||'')+' '+bedragStr+' '+bedragStr.replace('.',',')).toLowerCase();
     return haystack.indexOf(term)>=0;
   }):alles;
+  // Op datum sorteren (nieuwste bovenaan) — zonder dit stonden ze in willekeurige
+  // volgorde (de volgorde waarin ze zijn ingevoerd/ingelezen), lastig scannen.
+  treffers=treffers.slice().sort(function(a,b){
+    var da=parseDatumNL(a.datum),db=parseDatumNL(b.datum);
+    if(!da&&!db) return 0;
+    if(!da) return 1;
+    if(!db) return -1;
+    return db-da;
+  });
 
   if(!treffers.length){
     container.innerHTML='<div style="font-size:12px;color:#888;padding:6px 2px">Geen resultaten</div>';
@@ -861,7 +897,7 @@ function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
   var meerKnop=restant>0?
     '<button class="btw-pct-btn" style="display:block;width:100%;margin-top:2px;font-size:12px;font-weight:500" onclick="toonMeerKoppelOpties(\''+kind+'\',\''+ownId+'\')">↓ + '+restant+' meer tonen</button>':'';
   container.innerHTML=getoond.map(function(item){
-    var label=(item.omschrijving||'—')+' · '+fmt(item.bedrag)+' · '+item.datum;
+    var label=item.datum+' · '+(item.omschrijving||'—')+' · '+fmt(item.bedrag);
     var onclickAttr=kind==='tx'?
       'koppelHandmatig(\''+ownId+'\','+item.id+')':
       'koppelHandmatig(\''+item.id+'\','+ownId+')';
@@ -949,11 +985,11 @@ function handleBankFile(input){
 function renderBankTab(){
   var el=document.getElementById('tab-content');
   var matchableBonnen=gefilterdeBonnen().filter(function(b){return BEKENDE_REKENINGEN.indexOf(b.betaald)>=0;});
-  var gematchteBonnen=matchableBonnen.filter(function(b){return isVolledigGematcht(b);});
-  var nietGematchteBonnen=matchableBonnen.filter(function(b){return !isVolledigGematcht(b);});
+  var gematchteBonnen=sorteerOpDatumDesc(matchableBonnen.filter(function(b){return isVolledigGematcht(b);}));
+  var nietGematchteBonnen=sorteerOpDatumDesc(matchableBonnen.filter(function(b){return !isVolledigGematcht(b);}));
   var txAfschrijvingen=transacties.filter(function(t){return t.type==='af'&&voldoetAanZoek(t.bedrag,t.omschrijving,matchRekening(t.rekening));});
-  var txNietGematcht=txAfschrijvingen.filter(function(t){return !matchesByTxId[t.id]&&!twijfelgevallen[t.id]&&!handmatigTxGematcht[t.id];});
-  var txHandmatigGematcht=txAfschrijvingen.filter(function(t){return handmatigTxGematcht[t.id];});
+  var txNietGematcht=sorteerOpDatumDesc(txAfschrijvingen.filter(function(t){return !matchesByTxId[t.id]&&!twijfelgevallen[t.id]&&!handmatigTxGematcht[t.id];}));
+  var txHandmatigGematcht=sorteerOpDatumDesc(txAfschrijvingen.filter(function(t){return handmatigTxGematcht[t.id];}));
   // Belangrijk: de kandidatenlijst voor het HANDMATIG koppelen (zoekvelden) mag NIET
   // beïnvloed worden door de zoekbalk bovenaan of het jaar/kwartaal-filter — anders
   // vind je in het koppel-zoekveld ineens niks meer terug zodra er bovenin gefilterd is.
@@ -978,7 +1014,15 @@ function renderBankTab(){
     html+='<div class="tip">💡 <span>Upload een CSV van het bankafschrift om te checken welke bonnen al zijn afgeschreven</span></div>';
   }
 
-  var twijfelIds=Object.keys(twijfelgevallen);
+  var twijfelIds=Object.keys(twijfelgevallen).sort(function(txIdA,txIdB){
+    var txA=transacties.find(function(t){return t.id===txIdA;});
+    var txB=transacties.find(function(t){return t.id===txIdB;});
+    var da=txA?parseDatumNL(txA.datum):null,db=txB?parseDatumNL(txB.datum):null;
+    if(!da&&!db) return 0;
+    if(!da) return 1;
+    if(!db) return -1;
+    return db-da;
+  });
   if(twijfelIds.length){
     html+='<div class="section-title">Twijfelgevallen — kies zelf ('+twijfelIds.length+')</div>';
     html+=twijfelIds.map(function(txId){
@@ -1030,12 +1074,16 @@ function renderBankTab(){
     laatsteZichtbareTxIds=txNietGematcht.map(function(t){return t.id;});
     var alleTxGeselecteerd=laatsteZichtbareTxIds.length>0&&laatsteZichtbareTxIds.every(function(id){return geselecteerdeTransacties[id];});
     var nSelTx=Object.keys(geselecteerdeTransacties).length;
-    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 2px;margin-bottom:6px">'+
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 2px;margin-bottom:6px;flex-wrap:wrap;gap:6px">'+
       '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#555;cursor:pointer;margin:0">'+
         '<input type="checkbox" style="width:auto;margin:0" onclick="toggleSelecteerAlleTransacties(this.checked)"'+(alleTxGeselecteerd?' checked':'')+'>'+
         'Selecteer alles'+
       '</label>'+
-      (nSelTx?'<button class="btn-red" style="width:auto;padding:6px 12px;margin:0;font-size:12px" onclick="vraagVerwijderGeselecteerdeTransacties()">🗑 Verwijder ('+nSelTx+')</button>':'')+
+      (nSelTx?
+        '<div style="display:flex;gap:6px">'+
+          '<button class="btn-sec" style="width:auto;padding:6px 12px;margin:0;font-size:12px" onclick="markeerGeselecteerdeTransactiesGematcht()">✅ Markeer ('+nSelTx+')</button>'+
+          '<button class="btn-red" style="width:auto;padding:6px 12px;margin:0;font-size:12px" onclick="vraagVerwijderGeselecteerdeTransacties()">🗑 Verwijder ('+nSelTx+')</button>'+
+        '</div>':'')+
     '</div>';
     html+=txNietGematcht.map(function(t){
       var koppelVeld=nietGematchteBonnen.length?
