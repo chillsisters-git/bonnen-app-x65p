@@ -554,10 +554,10 @@ function renderTab(){
   }
 }
 
-function voldoetAanZoek(bedrag,omschrijving){
+function voldoetAanZoek(bedrag,omschrijving,rekeningNaam){
   if(!zoekTerm) return true;
   var bedragStr=(bedrag||0).toFixed(2);
-  var haystack=((omschrijving||'')+' '+bedragStr+' '+bedragStr.replace('.',',')).toLowerCase();
+  var haystack=((omschrijving||'')+' '+bedragStr+' '+bedragStr.replace('.',',')+' '+(rekeningNaam||'')).toLowerCase();
   return haystack.indexOf(zoekTerm)>=0;
 }
 
@@ -930,7 +930,7 @@ function renderBankTab(){
   var matchableBonnen=gefilterdeBonnen().filter(function(b){return BEKENDE_REKENINGEN.indexOf(b.betaald)>=0;});
   var gematchteBonnen=matchableBonnen.filter(function(b){return isVolledigGematcht(b);});
   var nietGematchteBonnen=matchableBonnen.filter(function(b){return !isVolledigGematcht(b);});
-  var txAfschrijvingen=transacties.filter(function(t){return t.type==='af'&&voldoetAanZoek(t.bedrag,t.omschrijving);});
+  var txAfschrijvingen=transacties.filter(function(t){return t.type==='af'&&voldoetAanZoek(t.bedrag,t.omschrijving,matchRekening(t.rekening));});
   var txNietGematcht=txAfschrijvingen.filter(function(t){return !matchesByTxId[t.id]&&!twijfelgevallen[t.id]&&!handmatigTxGematcht[t.id];});
   var txHandmatigGematcht=txAfschrijvingen.filter(function(t){return handmatigTxGematcht[t.id];});
   // Belangrijk: de kandidatenlijst voor het HANDMATIG koppelen (zoekvelden) mag NIET
