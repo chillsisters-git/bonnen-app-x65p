@@ -1,57 +1,74 @@
 // api/transacties.js
-// Permanente opslag van ingelezen bankafschrift-transacties + handmatige koppelingen,
-// via de Upstash Redis REST API. Bewust dezelfde stijl/aanpak als api/bonnen.js:
-// simpele GET (ophalen) en POST (opslaan) op één sleutel.
 //
-// LET OP: dit bestand gaat ervan uit dat dezelfde environment variables als
-// api/bonnen.js gebruikt worden: UPSTASH_REDIS_REST_URL en UPSTASH_REDIS_REST_TOKEN.
-// Als api/bonnen.js een andere aanpak gebruikt (bijv. het @upstash/redis package
-// in plaats van directe REST-calls), pas dit bestand daarop aan zodat de stijl
-// consistent blijft — de functionaliteit is identiek.
+// Permanente opslag van bankafschrift-transacties (Upstash Redis REST API).
+// Gebruikt DEZELFDE environment variables als api/bonnen.js:
+//   UPSTASH_REDIS_REST_URL
+//   UPSTASH_REDIS_REST_TOKEN
+//
+// BELANGRIJK: controleer of api/bonnen.js deze exacte REST-aanpak gebruikt
+// (directe fetch-calls naar Upstash) of het @upstash/redis package. Gebruikt
+// bonnen.js het package, pas dit bestand dan in dezelfde stijl aan zodat
+// beide bestanden consistent blijven.
+//
+// Slaat op: { transacties: [...], handmatig: {...}, genegeerd: {...} }
 
-const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL;
-const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
-const SLEUTEL = 'transacties_data';
+const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+const KEY = 'bankmatching:transacties';
 
-async function redisGet(key) {
-  const res = await fetch(`${REDIS_URL}/get/${key}`, {
-    headers: { Authorization: `Bearer ${REDIS_TOKEN}` }
+async function upstashGet(key) {
+  const res = await fetch(`${UPSTASH_URL}/get/${key}`, {
+    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` }
   });
+  if (!res.ok) throw new Error('Upstash GET fout: ' + res.status);
   const data = await res.json();
-  return data.result ? JSON.parse(data.result) : null;
+  return data.result; // null als de key nog niet bestaat
 }
 
-async function redisSet(key, value) {
-  await fetch(`${REDIS_URL}/set/${key}`, {
+async function upstashSet(key, valueAsString) {
+  const res = await fetch(`${UPSTASH_URL}/set/${encodeURIComponent(key)}`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${REDIS_TOKEN}`,
-      'Content-Type': 'application/json'
+      Authorization: `Bearer ${UPSTASH_TOKEN}`,
+      'Content-Type': 'text/plain'
     },
-    body: JSON.stringify(value)
+    body: valueAsString
   });
+  if (!res.ok) throw new Error('Upstash SET fout: ' + res.status);
+  return res.json();
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
+  if (!UPSTASH_URL || !UPSTASH_TOKEN) {
+    return res.status(500).json({
+      error: 'UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN ontbreken. Controleer je Vercel environment variables.'
+    });
+  }
+
   try {
     if (req.method === 'GET') {
-      const data = await redisGet(SLEUTEL);
-      res.status(200).json(data || { transacties: [], handmatig: {} });
-      return;
+      const raw = await upstashGet(KEY);
+      const data = raw
+        ? JSON.parse(raw)
+        : { transacties: [], handmatig: {}, genegeerd: {} };
+      return res.status(200).json(data);
     }
 
     if (req.method === 'POST') {
-      const { transacties, handmatig } = req.body;
-      await redisSet(SLEUTEL, {
-        transacties: transacties || [],
-        handmatig: handmatig || {}
-      });
-      res.status(200).json({ ok: true });
-      return;
+      const body = req.body || {};
+      const data = {
+        transacties: Array.isArray(body.transacties) ? body.transacties : [],
+        handmatig: body.handmatig && typeof body.handmatig === 'object' ? body.handmatig : {},
+        genegeerd: body.genegeerd && typeof body.genegeerd === 'object' ? body.genegeerd : {}
+      };
+      await upstashSet(KEY, JSON.stringify(data));
+      return res.status(200).json({ ok: true });
     }
 
-    res.status(405).json({ error: 'Methode niet toegestaan' });
+    res.setHeader('Allow', ['GET', 'POST']);
+    return res.status(405).end('Method Not Allowed');
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('api/transacties.js fout:', e);
+    return res.status(500).json({ error: e.message });
   }
-}
+};
