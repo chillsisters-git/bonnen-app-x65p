@@ -120,6 +120,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
       <button class="tab active" id="tab-bonnen" onclick="setTab('bonnen')">Bonnen</button>
       <button class="tab" id="tab-cat" onclick="setTab('cat')">Per categorie</button>
       <button class="tab" id="tab-bank" onclick="setTab('bank')">Bankafschrift</button>
+      <button class="tab" id="tab-afs" onclick="setTab('afs')">Afschriften</button>
     </div>
     <div id="tab-content"></div>
     <button class="btn-green" style="margin-top:1rem" onclick="setScreen('upload')">+ Nieuwe bon toevoegen</button>
@@ -146,6 +147,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
       <img id="preview-img" class="preview-img" style="display:none">
       <div id="preview-pdf" class="preview-pdf" style="display:none"><span class="preview-pdf-icon">📄</span>PDF-bestand</div>
       <div class="err" id="form-err" style="display:none"></div>
+      <div class="err" id="form-dubbel" style="display:none;background:#fef3e2;color:#854f0b"></div>
       <div class="ok" id="form-ok" style="display:none"></div>
       <div class="ai-hint" id="ai-hint" style="display:none">✨ AI heeft uitgelezen — controleer en sla op</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -484,7 +486,7 @@ function goBack(){editId=null;setScreen('overzicht');}
 
 function setTab(t){
   activeTab=t;
-  ['bonnen','cat','bank'].forEach(function(x){document.getElementById('tab-'+x).classList.toggle('active',x===t);});
+  ['bonnen','cat','bank','afs'].forEach(function(x){document.getElementById('tab-'+x).classList.toggle('active',x===t);});
   zoekTerm='';
   var zoekInput=document.getElementById('zoek-input');
   if(zoekInput) zoekInput.value='';
@@ -513,6 +515,7 @@ function renderTab(){
   var el=document.getElementById('tab-content');
   var lijst=gefilterdeBonnen();
   if(activeTab==='bank'){renderBankTab();return;}
+  if(activeTab==='afs'){renderAfschriftenTab();return;}
   if(activeTab==='bonnen'){
     if(!lijst.length){el.innerHTML='<div class="empty">Geen bonnen'+(activeKwartaal!=='alle'?' in '+activeKwartaal:'')+' — voeg er een toe!</div>';return;}
     var dubbeleBonnen=vindDubbeleBonnen();
@@ -634,18 +637,9 @@ function sorteerOpDatumDesc(lijst){
 // bedrag én een datum die dicht bij elkaar ligt (binnen 3 dagen). Retourneert een
 // object {bonId: true, ...} zodat het snel op te zoeken is bij het renderen.
 function vindDubbeleBonnen(){
+  // Zelfde regels als het blok "Mogelijk dubbele bonnen" op het tabblad Afschriften.
   var dubbel={};
-  for(var i=0;i<bonnen.length;i++){
-    for(var j=i+1;j<bonnen.length;j++){
-      var a=bonnen[i],b=bonnen[j];
-      if(Math.abs(a.bedrag-b.bedrag)>0.01) continue;
-      var verschil=dagVerschil(a.datum,b.datum);
-      if(verschil!==null&&verschil<=3){
-        dubbel[a.id]=true;
-        dubbel[b.id]=true;
-      }
-    }
-  }
+  dubbeleBonGroepen().forEach(function(groep){groep.forEach(function(b){dubbel[b.id]=true;});});
   return dubbel;
 }
 
@@ -1023,14 +1017,23 @@ function handleBankFile(input){
   }
   var reader=new FileReader();
   reader.onload=function(e){
-    var nieuwe=parseBankCSV(e.target.result);
-    if(!nieuwe.length){
+    var gevonden=parseBankCSV(e.target.result);
+    if(!gevonden.length){
       bankFoutmelding='Kon geen transacties herkennen in "'+file.name+'". Controleer of het een CSV-bestand is met een kolom voor datum en een kolom voor bedrag.';
     } else {
       bankFoutmelding=null;
-      transacties=transacties.concat(nieuwe);
-      matchTransacties();
-      bewaarTransacties();
+      var nieuwe=labelAfschrift(zonderAlBestaande(gevonden),file.name);
+      var overgeslagen=gevonden.length-nieuwe.length;
+      if(!nieuwe.length){
+        bankInfoMelding='"'+file.name+'" staat er al helemaal in — er is niets toegevoegd.';
+      } else {
+        transacties=transacties.concat(nieuwe);
+        matchTransacties();
+        bewaarTransacties();
+        bankInfoMelding='✓ '+nieuwe.length+' regel'+(nieuwe.length!==1?'s':'')+' ingelezen uit "'+file.name+'"'+
+          (overgeslagen?' · '+overgeslagen+' stond'+(overgeslagen!==1?'en':'')+' er al in en '+(overgeslagen!==1?'zijn':'is')+' overgeslagen':'')+
+          ' · te zien op het tabblad Afschriften';
+      }
     }
     renderBankTab();
     if(activeTab==='bonnen') renderTab(); // badges op bonnenlijst verversen
@@ -1184,14 +1187,20 @@ function leesVisaPdf(file){
         bankInfoMelding=null;
         bankFoutmelding='Kon geen transacties herkennen in "'+file.name+'". Deze PDF-functie is gemaakt voor Visa-afschriften van International Card Services. Is het een ander soort afschrift, of een gescande PDF? Upload dan een CSV.';
       } else {
-        var nieuwe=zonderAlBestaande(gevonden);
+        var nieuwe=labelAfschrift(zonderAlBestaande(gevonden),file.name);
         var overgeslagen=gevonden.length-nieuwe.length;
         var nAf=nieuwe.filter(function(t){return t.type==='af';}).length;
+        if(!nieuwe.length){
+          bankInfoMelding='"'+file.name+'" staat er al helemaal in — er is niets toegevoegd.';
+          renderBankTab();
+          return;
+        }
         transacties=transacties.concat(nieuwe);
         matchTransacties();
         bewaarTransacties();
         bankInfoMelding='✓ '+nAf+' Visa-afschrijving'+(nAf!==1?'en':'')+' ingelezen uit "'+file.name+'"'+
-          (overgeslagen?' · '+overgeslagen+' regel'+(overgeslagen!==1?'s':'')+' stond'+(overgeslagen!==1?'en':'')+' er al in en '+(overgeslagen!==1?'zijn':'is')+' overgeslagen':'');
+          (overgeslagen?' · '+overgeslagen+' regel'+(overgeslagen!==1?'s':'')+' stond'+(overgeslagen!==1?'en':'')+' er al in en '+(overgeslagen!==1?'zijn':'is')+' overgeslagen':'')+
+          ' · te zien op het tabblad Afschriften';
       }
       renderBankTab();
       if(activeTab==='bonnen') renderTab();
@@ -1209,6 +1218,415 @@ function leesVisaPdf(file){
   reader.readAsArrayBuffer(file);
 }
 // ============ EINDE VISA-PDF ============
+
+// ============ TABBLAD AFSCHRIFTEN ============
+// Overzicht van welke bankafschriften er zijn ingelezen, per rekening per maand,
+// plus een blok om dubbel gescande bonnen veilig op te ruimen.
+//
+// Elke transactie die vanaf nu wordt ingelezen krijgt een label mee van het afschrift
+// waar hij uit komt (afschriftId, afschriftNaam, geupload). Zo hoeft er aan de opslag
+// niets te veranderen: de labels reizen mee in de transacties zelf. Transacties van
+// vóór deze versie hebben geen label; die tonen we als "eerder geüpload".
+var afsOpenId=null;            // welk afschrift is uitgeklapt in de lijst
+var afsRasterFilter=null;      // {rekening:'7361', maand:'09-2026'} na tikken op een vakje, anders null
+var dubbelFotosTonen={};       // groepsleutel -> true als de foto's van die groep getoond worden
+var dubbelFotoCache={};        // bonId -> dataURL (of '' als er geen foto is)
+
+function esc(s){
+  return (''+(s==null?'':s)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});
+}
+
+function nuLabel(){
+  var d=new Date();
+  return pad2(d.getDate())+'-'+pad2(d.getMonth()+1)+'-'+d.getFullYear()+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());
+}
+
+// Geeft alle transacties van één upload hetzelfde afschrift-label.
+function labelAfschrift(lijst,bestandsnaam){
+  var id='afs'+Date.now();
+  var geupload=nuLabel();
+  lijst.forEach(function(t){
+    t.afschriftId=id;
+    t.afschriftNaam=bestandsnaam;
+    t.geupload=geupload;
+  });
+  return lijst;
+}
+
+function rekeningLabel(cijfers){
+  if(!cijfers) return 'Onbekende rekening';
+  return matchRekening(cijfers)||('Rekening …'+cijfers);
+}
+function rekeningKort(cijfers){
+  return rekeningLabel(cijfers).replace(/\s*\(.*\)/,'');
+}
+
+function datumKort(d){
+  var p=(d||'').split('-');
+  if(p.length<3) return d||'';
+  return parseInt(p[0],10)+' '+MAAND_NAMEN[parseInt(p[1],10)-1]+' '+p[2];
+}
+
+// Groepeert transacties per afschrift. Oude transacties zonder label worden per rekening
+// samengevoegd tot één groep "Eerder geüpload".
+function verzamelAfschriften(){
+  var groepen={};
+  transacties.forEach(function(t){
+    var key=t.afschriftId||('oud-'+(t.rekening||'onbekend'));
+    if(!groepen[key]){
+      groepen[key]={
+        id:key,
+        oud:!t.afschriftId,
+        naam:t.afschriftId?(t.afschriftNaam||'Afschrift'):'Eerder geüpload',
+        geupload:t.geupload||'',
+        rekeningen:{},
+        txs:[],
+        van:null,tot:null
+      };
+    }
+    var g=groepen[key];
+    g.txs.push(t);
+    g.rekeningen[t.rekening||'']=true;
+    var d=parseDatumNL(t.datum);
+    if(d){
+      if(!g.van||d<g.van.d) g.van={d:d,s:t.datum};
+      if(!g.tot||d>g.tot.d) g.tot={d:d,s:t.datum};
+    }
+  });
+  var lijst=Object.keys(groepen).map(function(k){return groepen[k];});
+  // Nieuwste upload eerst; de oude groepen onderaan.
+  lijst.sort(function(a,b){
+    if(a.oud!==b.oud) return a.oud?1:-1;
+    var ta=a.id.replace('afs',''),tb=b.id.replace('afs','');
+    if(!a.oud) return tb-ta;
+    return (b.tot?b.tot.d:0)-(a.tot?a.tot.d:0);
+  });
+  return lijst;
+}
+
+// Welke maanden laten we zien in het raster? Volgt de jaar- en kwartaalknoppen bovenaan.
+// Staan die op "alles", dan het huidige kwartaal.
+function rasterMaanden(){
+  var nu=new Date();
+  var jaar=activeJaar!=='alle'?parseInt(activeJaar,10):nu.getFullYear();
+  var maanden;
+  if(activeKwartaal!=='alle'){
+    var q=parseInt(activeKwartaal.replace('Q',''),10);
+    maanden=[q*3-2,q*3-1,q*3];
+  } else if(activeJaar!=='alle'){
+    maanden=[1,2,3,4,5,6,7,8,9,10,11,12];
+  } else {
+    var hq=Math.floor(nu.getMonth()/3)+1;
+    maanden=[hq*3-2,hq*3-1,hq*3];
+  }
+  return maanden.map(function(m){return {maand:m,jaar:jaar,sleutel:pad2(m)+'-'+jaar};});
+}
+function rasterTitel(){
+  var nu=new Date();
+  var jaar=activeJaar!=='alle'?activeJaar:nu.getFullYear();
+  if(activeKwartaal!=='alle') return activeKwartaal+' '+jaar;
+  if(activeJaar!=='alle') return 'Heel '+jaar;
+  return 'Q'+(Math.floor(nu.getMonth()/3)+1)+' '+jaar+' (huidig kwartaal)';
+}
+
+// Status van één rekening in één maand:
+//  'compleet' — er zijn transacties en de gegevens lopen door tot (bijna) het eind van de maand
+//  'deels'    — er zijn transacties maar de gegevens stoppen halverwege (of beginnen halverwege)
+//  'leeg'     — geen enkele transactie in die maand
+//  'toekomst' — maand is nog niet begonnen
+// "Waarschijnlijk" als de gegevens alleen uit oude uploads komen: dan weten we de periode
+// van het afschrift niet precies, alleen de datums van de transacties.
+function rasterStatus(cijfers,m){
+  var begin=new Date(m.jaar,m.maand-1,1);
+  var eind=new Date(m.jaar,m.maand,0);
+  var vandaag=new Date();vandaag.setHours(0,0,0,0);
+  if(begin>vandaag) return {status:'toekomst'};
+  var vanRek=transacties.filter(function(t){return (t.rekening||'')===cijfers;});
+  var inMaand=vanRek.filter(function(t){var d=parseDatumNL(t.datum);return d&&d>=begin&&d<=eind;});
+  if(!inMaand.length) return {status:'leeg'};
+  var datums=vanRek.map(function(t){return parseDatumNL(t.datum);}).filter(Boolean);
+  var eerste=new Date(Math.min.apply(null,datums));
+  var laatste=new Date(Math.max.apply(null,datums));
+  var eindeMaandOfVandaag=eind<vandaag?eind:vandaag;
+  var loopTotEind=laatste>=new Date(eindeMaandOfVandaag.getTime()-5*86400000);
+  var begintOpTijd=eerste<=new Date(begin.getTime()+5*86400000);
+  var alleenOud=inMaand.every(function(t){return !t.afschriftId;});
+  var res={aantal:inMaand.length,alleenOud:alleenOud};
+  if(loopTotEind&&begintOpTijd){res.status='compleet';}
+  else{
+    res.status='deels';
+    if(!loopTotEind) res.tot=pad2(laatste.getDate())+'-'+pad2(laatste.getMonth()+1)+'-'+laatste.getFullYear();
+    if(!begintOpTijd) res.vanaf=pad2(eerste.getDate())+'-'+pad2(eerste.getMonth()+1)+'-'+eerste.getFullYear();
+  }
+  return res;
+}
+
+function kiesRasterVak(cijfers,sleutel){
+  if(afsRasterFilter&&afsRasterFilter.rekening===cijfers&&afsRasterFilter.maand===sleutel) afsRasterFilter=null;
+  else afsRasterFilter={rekening:cijfers,maand:sleutel};
+  afsOpenId=null;
+  renderAfschriftenTab();
+}
+function wisRasterFilter(){afsRasterFilter=null;renderAfschriftenTab();}
+function toggleAfschrift(id){afsOpenId=afsOpenId===id?null:id;renderAfschriftenTab();}
+
+function vraagVerwijderAfschrift(id){
+  var g=verzamelAfschriften().find(function(x){return x.id===id;});
+  if(!g) return;
+  pendingDelete={type:'afschrift',id:id};
+  var gekoppeld=g.txs.filter(function(t){return matchesByTxId[t.id]||handmatigTxGematcht[t.id];}).length;
+  document.getElementById('confirm-txt').textContent='Afschrift "'+g.naam+'" verwijderen? Dan verdwijnen de '+g.txs.length+' transacties daaruit'+
+    (gekoppeld?', en '+(gekoppeld!==1?gekoppeld+' koppelingen met bonnen worden':'1 koppeling met een bon wordt')+' losgemaakt. De bonnen zelf blijven staan.':'. Bonnen blijven gewoon staan.');
+  document.getElementById('confirm-overlay').classList.add('show');
+}
+function verwijderAfschrift(id){
+  var g=verzamelAfschriften().find(function(x){return x.id===id;});
+  if(!g) return;
+  var ids=g.txs.map(function(t){return t.id;});
+  transacties=transacties.filter(function(t){return ids.indexOf(t.id)<0;});
+  ids.forEach(function(txId){delete handmatigeKoppelingen[txId];delete genegeerd[txId];delete handmatigTxGematcht[txId];delete geselecteerdeTransacties[txId];});
+  if(afsOpenId===id) afsOpenId=null;
+  bewaarTransacties();
+  matchTransacties();
+}
+
+// ---------- Dubbele bonnen ----------
+function normOmschrijving(s){return (s||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
+function lijktOpElkaar(a,b){
+  var na=normOmschrijving(a),nb=normOmschrijving(b);
+  if(!na||!nb) return false;
+  var n=Math.min(8,na.length,nb.length);
+  if(n<4) return na===nb;
+  return na.slice(0,n)===nb.slice(0,n);
+}
+// Twee bonnen zijn mogelijk dubbel als het bedrag gelijk is en
+//  - de datums binnen 3 dagen liggen, of
+//  - de omschrijving vrijwel gelijk is en de datums binnen 10 dagen liggen
+//    (vangt ook een datum die de AI net anders heeft uitgelezen).
+// Herhalende posten en paren die je zelf als "geen dubbel" hebt gemarkeerd tellen niet mee.
+function zijnMogelijkDubbel(a,b){
+  if(a.id===b.id) return false;
+  if(Math.abs((a.bedrag||0)-(b.bedrag||0))>0.01) return false;
+  if(!(a.bedrag>0)) return false;
+  if(a.herhalend||b.herhalend) return false;
+  if((a.nietDubbel||[]).indexOf(b.id)>=0||(b.nietDubbel||[]).indexOf(a.id)>=0) return false;
+  var v=dagVerschil(a.datum,b.datum);
+  if(v===null) return lijktOpElkaar(a.omschrijving,b.omschrijving);
+  if(v<=3) return true;
+  return v<=10&&lijktOpElkaar(a.omschrijving,b.omschrijving);
+}
+function dubbeleBonGroepen(){
+  var ouder={};
+  function vind(x){while(ouder[x]!==x){ouder[x]=ouder[ouder[x]];x=ouder[x];}return x;}
+  bonnen.forEach(function(b){ouder[b.id]=b.id;});
+  var heeftPaar={};
+  for(var i=0;i<bonnen.length;i++){
+    for(var j=i+1;j<bonnen.length;j++){
+      if(zijnMogelijkDubbel(bonnen[i],bonnen[j])){
+        ouder[vind(bonnen[i].id)]=vind(bonnen[j].id);
+        heeftPaar[bonnen[i].id]=heeftPaar[bonnen[j].id]=true;
+      }
+    }
+  }
+  var groepen={};
+  bonnen.forEach(function(b){
+    if(!heeftPaar[b.id]) return;
+    var r=vind(b.id);
+    (groepen[r]=groepen[r]||[]).push(b);
+  });
+  return Object.keys(groepen).map(function(k){return sorteerOpDatumDesc(groepen[k]);});
+}
+function bonIsGekoppeld(b){
+  return !!(b.handmatigGematcht||(matchesByBonId[b.id]&&matchesByBonId[b.id].length));
+}
+function groepSleutel(groep){return groep.map(function(b){return b.id;}).sort().join('-');}
+
+function markeerGeenDubbel(sleutel){
+  var ids=sleutel.split('-').map(function(s){return parseInt(s,10);});
+  bonnen.forEach(function(b){
+    if(ids.indexOf(b.id)<0) return;
+    var lijst=b.nietDubbel||[];
+    ids.forEach(function(id){if(id!==b.id&&lijst.indexOf(id)<0) lijst.push(id);});
+    b.nietDubbel=lijst;
+  });
+  bewaarBonnen();
+  renderTab();
+}
+
+function toonDubbelFotos(sleutel){
+  dubbelFotosTonen[sleutel]=!dubbelFotosTonen[sleutel];
+  renderAfschriftenTab();
+  if(!dubbelFotosTonen[sleutel]) return;
+  sleutel.split('-').forEach(function(s){
+    var id=parseInt(s,10);
+    var b=bonnen.find(function(x){return x.id===id;});
+    if(!b||!b.heeftFoto||dubbelFotoCache[id]!==undefined) return;
+    fetch('/api/bonnen?type=foto&id='+id).then(function(r){return r.json();}).then(function(data){
+      dubbelFotoCache[id]=data.foto||'';
+      if(activeTab==='afs') renderAfschriftenTab();
+    }).catch(function(){dubbelFotoCache[id]='';if(activeTab==='afs') renderAfschriftenTab();});
+  });
+}
+
+function vraagVerwijderKopie(id){
+  var bon=bonnen.find(function(b){return b.id===id;});
+  if(!bon) return;
+  pendingDelete={type:'bon',id:id};
+  document.getElementById('confirm-txt').textContent='Deze kopie verwijderen? "'+(bon.omschrijving||'bon')+'" · '+fmt(bon.bedrag)+' · '+bon.datum+
+    (bonIsGekoppeld(bon)?' — let op: deze bon is gekoppeld aan het bankafschrift.':'')+' De andere bon blijft gewoon staan.';
+  document.getElementById('confirm-overlay').classList.add('show');
+}
+
+// Zoekt bij het scannen of een nieuwe bon er al lijkt te staan.
+function zoekBestaandeBon(nieuw){
+  return bonnen.filter(function(b){return b.id!==nieuw.id&&zijnMogelijkDubbel(nieuw,b);});
+}
+
+// ---------- Weergave ----------
+function renderAfschriftenTab(){
+  var el=document.getElementById('tab-content');
+  var html='';
+  var afschriften=verzamelAfschriften();
+
+  // Maandraster
+  var maanden=rasterMaanden();
+  var rekeningen=REKENINGEN.filter(function(r){return r.cijfers!=='contant';}).map(function(r){return r.cijfers;});
+  transacties.forEach(function(t){var c=t.rekening||'';if(rekeningen.indexOf(c)<0) rekeningen.push(c);});
+  html+='<div class="section-title">Welke maanden zijn compleet? · '+esc(rasterTitel())+'</div>';
+  if(!transacties.length){
+    html+='<div class="card"><div class="empty" style="padding:1rem">Nog geen bankafschriften ingelezen. Upload ze op het tabblad Bankafschrift.</div></div>';
+  } else {
+    html+='<div class="card" style="padding:10px 8px;overflow-x:auto">';
+    html+='<table style="border-collapse:collapse;width:100%;font-size:12px">';
+    html+='<tr><th style="text-align:left;font-weight:500;color:#888;padding:4px 6px"></th>'+maanden.map(function(m){
+      return '<th style="font-weight:500;color:#888;padding:4px 2px;text-align:center">'+MAAND_NAMEN[m.maand-1]+'</th>';
+    }).join('')+'</tr>';
+    rekeningen.forEach(function(c){
+      html+='<tr><td style="padding:6px;white-space:nowrap;color:#1d1d1f">'+esc(rekeningKort(c))+'</td>';
+      maanden.forEach(function(m){
+        var s=rasterStatus(c,m);
+        var gekozen=afsRasterFilter&&afsRasterFilter.rekening===c&&afsRasterFilter.maand===m.sleutel;
+        var inhoud,bg,kleur,titel;
+        if(s.status==='compleet'&&!s.alleenOud){inhoud='✓';bg='#e6f7f1';kleur='#0f6e56';titel='Compleet ('+s.aantal+' transacties)';}
+        else if(s.status==='compleet'){inhoud='✓?';bg='#eef2f0';kleur='#5f7a70';titel='Waarschijnlijk compleet — uit een oudere upload ('+s.aantal+' transacties)';}
+        else if(s.status==='deels'){inhoud='½';bg='#fef3e2';kleur='#854f0b';titel='Deels'+(s.vanaf?' — vanaf '+s.vanaf:'')+(s.tot?' — t/m '+s.tot:'')+' ('+s.aantal+' transacties)';}
+        else if(s.status==='leeg'){inhoud='–';bg='#fdecea';kleur='#c0392b';titel='Geen transacties in deze maand — ontbreekt er een afschrift?';}
+        else {inhoud='';bg='#fafafa';kleur='#bbb';titel='Nog niet begonnen';}
+        var klik=s.status==='toekomst'?'':' onclick="kiesRasterVak(\''+c+'\',\''+m.sleutel+'\')"';
+        html+='<td style="padding:2px;text-align:center"><div title="'+esc(titel)+'"'+klik+' style="cursor:'+(klik?'pointer':'default')+';border-radius:6px;padding:6px 0;min-width:30px;font-weight:600;background:'+bg+';color:'+kleur+(gekozen?';outline:2px solid #111':'')+'">'+inhoud+'</div></td>';
+      });
+      html+='</tr>';
+    });
+    html+='</table>';
+    html+='<div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:#888;margin-top:8px;padding:0 4px">'+
+      '<span><b style="color:#0f6e56">✓</b> compleet</span>'+
+      '<span><b style="color:#5f7a70">✓?</b> waarschijnlijk (oude upload)</span>'+
+      '<span><b style="color:#854f0b">½</b> deels</span>'+
+      '<span><b style="color:#c0392b">–</b> ontbreekt</span>'+
+    '</div>';
+    html+='<div style="font-size:11px;color:#aaa;margin-top:6px;padding:0 4px">Tik op een vakje om te zien uit welk afschrift die maand komt. Een privérekening zonder uitgaven in een maand staat ook op "–".</div>';
+    html+='</div>';
+  }
+
+  // Lijst met afschriften
+  var lijst=afschriften;
+  var filterTekst='';
+  if(afsRasterFilter){
+    var mm=afsRasterFilter.maand.split('-');
+    var begin=new Date(parseInt(mm[1],10),parseInt(mm[0],10)-1,1),eind=new Date(parseInt(mm[1],10),parseInt(mm[0],10),0);
+    lijst=afschriften.filter(function(g){
+      return g.txs.some(function(t){var d=parseDatumNL(t.datum);return (t.rekening||'')===afsRasterFilter.rekening&&d&&d>=begin&&d<=eind;});
+    });
+    filterTekst=rekeningKort(afsRasterFilter.rekening)+' · '+MAAND_NAMEN[parseInt(mm[0],10)-1]+' '+mm[1];
+  }
+  html+='<div class="section-title">Geüploade afschriften ('+lijst.length+')</div>';
+  if(afsRasterFilter){
+    html+='<div class="tip" style="justify-content:space-between;align-items:center"><span>Alleen afschriften met <b>'+esc(filterTekst)+'</b></span><span onclick="wisRasterFilter()" style="cursor:pointer;color:#E31E24;white-space:nowrap">Toon alles ✕</span></div>';
+  }
+  if(!lijst.length){
+    html+='<div class="empty">'+(afsRasterFilter?'Geen afschrift voor deze maand — die moet nog geüpload worden.':'Nog geen afschriften geüpload.')+'</div>';
+  }
+  lijst.forEach(function(g){
+    var reks=Object.keys(g.rekeningen).map(rekeningKort).join(', ');
+    var nAf=g.txs.filter(function(t){return t.type==='af';}).length;
+    var nBij=g.txs.length-nAf;
+    var nKoppel=g.txs.filter(function(t){return t.type==='af'&&(matchesByTxId[t.id]||handmatigTxGematcht[t.id]);}).length;
+    var open=afsOpenId===g.id;
+    html+='<div class="card" style="border-left:3px solid '+(g.oud?'#ccc':'#1D9E75')+'">';
+    html+='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'+
+      '<div style="min-width:0">'+
+        '<div style="font-size:13px;font-weight:600;word-break:break-word">'+(g.oud?'📁 ':'📄 ')+esc(reks)+' · '+esc(g.naam)+'</div>'+
+        '<div style="font-size:12px;color:#555;margin-top:3px">'+(g.van?esc(datumKort(g.van.s))+' – '+esc(datumKort(g.tot.s)):'geen datums')+'</div>'+
+        '<div style="font-size:11px;color:#888;margin-top:2px">'+nAf+' afschrijving'+(nAf!==1?'en':'')+(nBij?' · '+nBij+' bijschrijving'+(nBij!==1?'en':''):'')+
+          ' · '+nKoppel+' van '+nAf+' afgehandeld'+
+          (g.oud?' · bestandsnaam onbekend (geüpload vóór deze versie)':(g.geupload?' · geüpload '+esc(g.geupload):''))+'</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:6px;flex:none">'+
+        '<button class="btn-edit" onclick="toggleAfschrift(\''+g.id+'\')" title="Transacties bekijken">'+(open?'▲':'▼')+'</button>'+
+        (g.oud?'':'<button class="btn-del" onclick="vraagVerwijderAfschrift(\''+g.id+'\')" title="Heel afschrift verwijderen">🗑</button>')+
+      '</div>'+
+    '</div>';
+    if(open){
+      html+='<div style="margin-top:8px;border-top:1px solid #f0f0f0;padding-top:6px">'+sorteerOpDatumDesc(g.txs).map(function(t){
+        var status=t.type!=='af'?'<span style="color:#888">bij</span>':
+          (matchesByTxId[t.id]?'<span style="color:#0f6e56">🔗 bon</span>':(handmatigTxGematcht[t.id]?'<span style="color:#0f6e56">✅ afgehandeld</span>':'<span style="color:#854f0b">zonder bon</span>'));
+        return '<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0;font-size:12px;border-bottom:1px solid #f7f7f7">'+
+          '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🏦 '+esc(t.datum)+' · '+esc(t.omschrijving||'—')+'</span>'+
+          '<span style="flex:none;text-align:right">'+fmt(t.bedrag)+' · '+status+'</span></div>';
+      }).join('')+'</div>';
+    }
+    html+='</div>';
+  });
+
+  // Dubbele bonnen
+  var groepen=dubbeleBonGroepen();
+  html+='<div class="section-title">Mogelijk dubbele bonnen ('+groepen.length+')</div>';
+  if(!groepen.length){
+    html+='<div class="empty">Geen dubbele bonnen gevonden ✓</div>';
+  } else {
+    html+='<div class="tip" style="background:#fef3e2">⚠️ <span>Elke kopie telt mee in de btw-aftrekpost. Bekijk ze naast elkaar, houd de goede en verwijder de kopie. Zijn het echt twee aankopen? Tik dan op "Geen dubbel".</span></div>';
+    groepen.forEach(function(groep){
+      var sleutel=groepSleutel(groep);
+      var fotos=dubbelFotosTonen[sleutel];
+      var eenGekoppeld=groep.some(bonIsGekoppeld);
+      html+='<div class="card">';
+      groep.forEach(function(b,i){
+        var gekoppeld=bonIsGekoppeld(b);
+        var label=gekoppeld?'<span class="badge badge-zakelijk">🔗 Gekoppeld — houden</span>':
+          (eenGekoppeld?'<span class="badge badge-prive">Waarschijnlijk de kopie</span>':'<span class="badge badge-anders">Niet gekoppeld</span>');
+        var foto='';
+        if(fotos){
+          if(!b.heeftFoto) foto='<div class="preview-pdf" style="padding:14px;margin:6px 0 0">Geen foto</div>';
+          else if(dubbelFotoCache[b.id]===undefined) foto='<div class="preview-pdf" style="padding:14px;margin:6px 0 0">Foto laden…</div>';
+          else if(!dubbelFotoCache[b.id]) foto='<div class="preview-pdf" style="padding:14px;margin:6px 0 0">Foto niet gevonden</div>';
+          else if(dubbelFotoCache[b.id].indexOf('data:application/pdf')===0) foto='<div class="preview-pdf" style="padding:14px;margin:6px 0 0">📄 PDF-bon</div>';
+          else foto='<img src="'+dubbelFotoCache[b.id]+'" style="width:100%;max-height:220px;object-fit:contain;border-radius:8px;background:#f5f5f7;margin-top:6px">';
+        }
+        html+='<div style="padding:8px 0;'+(i?'border-top:1px dashed #e5e5e5':'')+'">'+
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'+
+            '<div style="min-width:0">'+
+              '<div style="font-size:13px;word-break:break-word">🧾 '+esc(b.omschrijving||'—')+'</div>'+
+              '<div style="font-size:11px;color:#888;margin-top:3px">'+esc(b.datum)+' · '+fmt(b.bedrag)+(b.btw>0?' · btw '+fmt(b.btw):'')+' · '+esc(b.betaald||'')+'</div>'+
+              '<div style="margin-top:4px">'+label+'</div>'+
+            '</div>'+
+            '<div style="display:flex;gap:6px;flex:none">'+
+              '<button class="btn-edit" onclick="bewerkBon('+b.id+')" title="Bekijken / bewerken">✏️</button>'+
+              '<button class="btn-del" onclick="vraagVerwijderKopie('+b.id+')" title="Deze kopie verwijderen">🗑</button>'+
+            '</div>'+
+          '</div>'+foto+
+        '</div>';
+      });
+      html+='<div style="display:flex;gap:8px;margin-top:6px">'+
+        '<button class="btn-sec" style="margin:0;padding:8px;font-size:12px" onclick="toonDubbelFotos(\''+sleutel+'\')">'+(fotos?'Verberg foto\'s':'📷 Toon foto\'s')+'</button>'+
+        '<button class="btn-sec" style="margin:0;padding:8px;font-size:12px" onclick="markeerGeenDubbel(\''+sleutel+'\')">Geen dubbel</button>'+
+      '</div>';
+      html+='</div>';
+    });
+  }
+
+  el.innerHTML=html;
+}
+// ============ EINDE TABBLAD AFSCHRIFTEN ============
 
 function renderBankTab(){
   var el=document.getElementById('tab-content');
@@ -1488,6 +1906,7 @@ function bewerkBon(id){
   document.getElementById('form-ok').style.display='none';
   document.getElementById('ai-hint').style.display='none';
   document.getElementById('header-title').textContent='Bon bewerken';
+  document.getElementById('form-dubbel').style.display='none';
   document.getElementById('f-datum').value=bon.datum;
   document.getElementById('f-omschrijving').value=bon.omschrijving;
   document.getElementById('f-type').value=bon.type;
@@ -1547,6 +1966,13 @@ function bevestigVerwijder(){
     document.getElementById('confirm-overlay').classList.remove('show');
     renderBankTab();
     if(activeTab==='bonnen') renderTab();
+    return;
+  }
+  if(pendingDelete.type==='afschrift'){
+    verwijderAfschrift(pendingDelete.id);
+    pendingDelete=null;
+    document.getElementById('confirm-overlay').classList.remove('show');
+    renderTab();
     return;
   }
   if(pendingDelete.type==='bonnen-bulk'){
@@ -1691,6 +2117,33 @@ function showForm(d,pct,err,aiOk){
   activeBTWpct=pct||21;
   [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.toggle('active',p===activeBTWpct);});
   document.getElementById('btw-anders').value='';
+  dubbelBevestigd=false;
+  document.getElementById('form-dubbel').style.display='none';
+  if(!editId){
+    var bestaand=zoekBestaandeBon({id:-1,datum:d.datum,bedrag:parseAmt(d.bedrag),omschrijving:d.omschrijving,herhalend:!!d.herhalend});
+    if(bestaand.length){toonDubbelWaarschuwing(bestaand);dubbelBevestigd=true;}
+  }
+}
+
+// Waarschuwing als een nieuwe bon er al lijkt te staan (bij scannen of opslaan).
+var dubbelBevestigd=false;
+function toonDubbelWaarschuwing(bestaand){
+  var el=document.getElementById('form-dubbel');
+  el.innerHTML='<b>⚠️ Deze bon lijkt er al in te staan:</b>'+bestaand.slice(0,3).map(function(b){
+    return '<div style="margin-top:4px">🧾 '+esc(b.omschrijving||'—')+' · '+fmt(b.bedrag)+' · '+esc(b.datum)+(bonIsGekoppeld(b)?' · 🔗 al gekoppeld':'')+'</div>';
+  }).join('')+
+  '<div style="margin-top:6px">Staat hij er al in? Ga dan terug met ← en sla hem niet op. Is het een andere aankoop? Klik dan gewoon op Opslaan.</div>';
+  el.style.display='block';
+  el.scrollIntoView({behavior:'smooth',block:'center'});
+}
+// Controleert vlak voor het opslaan van een NIEUWE bon; geeft true als er eerst gewaarschuwd moet worden.
+function moetEerstWaarschuwen(bon){
+  if(editId||dubbelBevestigd) return false;
+  var bestaand=zoekBestaandeBon(bon);
+  if(!bestaand.length) return false;
+  toonDubbelWaarschuwing(bestaand);
+  dubbelBevestigd=true;
+  return true;
 }
 
 function getFormData(){
@@ -1784,9 +2237,11 @@ function uploadToDrive(bon){
 
 function saveBon(){
   var bon=getFormData();
+  if(moetEerstWaarschuwen(bon)) return;
   if(editId){
     var idx=bonnen.findIndex(function(b){return b.id===editId;});
-    if(idx>=0)bonnen[idx]=bon;
+    // Velden die niet in het formulier staan (koppelstatus, Drive-link, "geen dubbel") bewaren.
+    if(idx>=0)bonnen[idx]=Object.assign({},bonnen[idx],bon);
     editId=null;
   } else {
     bonnen.unshift(bon);
@@ -1799,7 +2254,8 @@ function saveBon(){
 
 function saveBonSheets(){
   var bon=getFormData();
-  if(editId){var idx=bonnen.findIndex(function(b){return b.id===editId;});if(idx>=0)bonnen[idx]=bon;editId=null;}
+  if(moetEerstWaarschuwen(bon)) return;
+  if(editId){var idx=bonnen.findIndex(function(b){return b.id===editId;});if(idx>=0)bonnen[idx]=Object.assign({},bonnen[idx],bon);editId=null;}
   else{bonnen.unshift(bon);}
   bewaarBonnen();
   bewaarFoto(bon.id,previewSrc);
@@ -1865,7 +2321,7 @@ function laadTransacties(){
     genegeerd=data.genegeerd||{};
     handmatigTxGematcht=data.txGematcht||{};
     matchTransacties();
-    if(activeTab==='bank') renderBankTab();
+    if(activeTab==='bank'||activeTab==='afs') renderTab();
   }).catch(function(){});
 }
 
