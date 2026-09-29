@@ -1009,10 +1009,18 @@ function ontkoppelMatch(bonId,txId){
 }
 
 var bankFoutmelding=null;
+var bankInfoMelding=null; // groene melding na een geslaagde import (bijv. uit een Visa-PDF)
 
 function handleBankFile(input){
   var file=input.files[0];
   if(!file) return;
+  bankInfoMelding=null;
+  var isPdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name);
+  if(isPdf){
+    input.value='';
+    leesVisaPdf(file);
+    return;
+  }
   var reader=new FileReader();
   reader.onload=function(e){
     var nieuwe=parseBankCSV(e.target.result);
@@ -1034,6 +1042,173 @@ function handleBankFile(input){
   reader.readAsText(file);
   input.value='';
 }
+
+// ============ VISA-AFSCHRIFT (PDF) INLEZEN ============
+// International Card Services (ICS) levert Visa-afschriften alleen als PDF. Die lezen we
+// hier in de browser zelf uit met pdf.js — het bestand wordt nergens naartoe gestuurd.
+// Een transactieregel ziet er zo uit:
+//   15 aug.  16 aug.  Sixt 1017233889  Hoofddorp  NL  18,22  Af
+// (transactiedatum, verwerkingsdatum, omschrijving, plaats, land, bedrag, Af/Bij).
+// Het jaartal staat niet op de regel; dat halen we uit de datums elders op het afschrift.
+var PDFJS_VERSIE='3.11.174';
+var pdfjsLaadBelofte=null;
+var MAANDEN_PDF={jan:1,januari:1,feb:2,februari:2,mrt:3,maart:3,mar:3,apr:4,april:4,mei:5,may:5,jun:6,juni:6,jul:7,juli:7,aug:8,augustus:8,sep:9,sept:9,september:9,okt:10,oktober:10,oct:10,nov:11,november:11,dec:12,december:12};
+var VISA_CIJFERS='5749';
+
+function laadPdfJs(){
+  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if(pdfjsLaadBelofte) return pdfjsLaadBelofte;
+  pdfjsLaadBelofte=new Promise(function(resolve,reject){
+    var sc=document.createElement('script');
+    sc.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/'+PDFJS_VERSIE+'/pdf.min.js';
+    sc.onload=function(){
+      if(!window.pdfjsLib){reject(new Error('pdf.js niet beschikbaar'));return;}
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/'+PDFJS_VERSIE+'/pdf.worker.min.js';
+      resolve(window.pdfjsLib);
+    };
+    sc.onerror=function(){pdfjsLaadBelofte=null;reject(new Error('pdf.js kon niet geladen worden (geen internet?)'));};
+    document.head.appendChild(sc);
+  });
+  return pdfjsLaadBelofte;
+}
+
+// Zet de tekst van een PDF om in regels: tekststukjes op (ongeveer) dezelfde hoogte
+// horen bij dezelfde regel, van links naar rechts gesorteerd.
+function pdfNaarRegels(pdf){
+  var paginas=[];
+  for(var p=1;p<=pdf.numPages;p++) paginas.push(p);
+  return Promise.all(paginas.map(function(nr){
+    return pdf.getPage(nr).then(function(page){return page.getTextContent();}).then(function(tc){
+      var stukjes=tc.items.filter(function(it){return it.str&&it.str.trim().length;}).map(function(it){
+        return {x:it.transform[4],y:it.transform[5],t:it.str.trim()};
+      });
+      stukjes.sort(function(a,b){return (b.y-a.y)||(a.x-b.x);});
+      var regels=[];
+      stukjes.forEach(function(s){
+        var r=regels.length?regels[regels.length-1]:null;
+        if(r&&Math.abs(r.y-s.y)<=3){r.items.push(s);}
+        else regels.push({y:s.y,items:[s]});
+      });
+      return regels.map(function(r){
+        r.items.sort(function(a,b){return a.x-b.x;});
+        return r.items.map(function(i){return i.t;}).join(' ').replace(/\s+/g,' ').trim();
+      });
+    });
+  })).then(function(perPagina){return [].concat.apply([],perPagina);});
+}
+
+function maandNummer(woord){
+  return MAANDEN_PDF[(woord||'').toLowerCase().replace(/\./g,'')]||0;
+}
+
+// Bepaalt jaar en maand van het afschrift uit volledige datums in de tekst
+// (bijv. "bijgewerkt tot 11 september 2026" of "11-09-2026"); de laatste datum wint.
+function bepaalAfschriftPeriode(regels,bestandsnaam){
+  var beste=null;
+  function kandidaat(j,m){
+    if(!j||!m||m<1||m>12||j<2000||j>2100) return;
+    var sleutel=j*12+m;
+    if(!beste||sleutel>beste.sleutel) beste={jaar:j,maand:m,sleutel:sleutel};
+  }
+  regels.forEach(function(r){
+    var re1=/(\d{1,2})\s+([a-zA-Z]{3,9})\.?\s+(20\d{2})/g,m;
+    while((m=re1.exec(r))) kandidaat(parseInt(m[3],10),maandNummer(m[2]));
+    var re2=/\b(\d{1,2})[-\/.](\d{1,2})[-\/.](20\d{2})\b/g;
+    while((m=re2.exec(r))) kandidaat(parseInt(m[3],10),parseInt(m[2],10));
+  });
+  if(!beste){
+    var f=(bestandsnaam||'').match(/(20\d{2})[-_ ]?(\d{2})/);
+    if(f) kandidaat(parseInt(f[1],10),parseInt(f[2],10));
+  }
+  if(!beste){var nu=new Date();kandidaat(nu.getFullYear(),nu.getMonth()+1);}
+  return beste;
+}
+
+function parseVisaPdfRegels(regels,bestandsnaam){
+  var periode=bepaalAfschriftPeriode(regels,bestandsnaam);
+  var maandRe='([a-zA-Z]{3,9})\\.?';
+  var re=new RegExp('^(\\d{1,2})\\s+'+maandRe+'\\s+(\\d{1,2})\\s+'+maandRe+'\\s+(.+?)\\s+(-?[\\d.]+,\\d{2})\\s*(Af|Bij)$','i');
+  var cijfers=VISA_CIJFERS; // een ICS-afschrift is altijd van de Visa-kaart
+  var result=[];
+  var stempel=Date.now();
+  regels.forEach(function(regel,i){
+    var m=regel.match(re);
+    if(!m) return;
+    var dag=parseInt(m[1],10),maand=maandNummer(m[2]);
+    if(!maand||dag<1||dag>31) return;
+    // Jaar: normaal dat van het afschrift; een maand die "na" de afschriftmaand valt
+    // hoort bij het jaar ervoor (bijv. december-transacties op een januari-afschrift).
+    var jaar=periode.jaar;
+    if(maand>periode.maand+1) jaar=periode.jaar-1;
+    var omschrijving=m[5].replace(/\s+/g,' ').trim();
+    result.push({
+      id:'txpdf'+i+'-'+stempel,
+      datum:pad2(dag)+'-'+pad2(maand)+'-'+jaar,
+      bedrag:Math.abs(normaliseerBedrag(m[6])),
+      type:m[7].toLowerCase()==='af'?'af':'bij',
+      omschrijving:omschrijving,
+      rekening:cijfers
+    });
+  });
+  return result;
+}
+
+// Transacties die al eerder zijn ingelezen (zelfde datum, bedrag, omschrijving en rekening)
+// slaan we over, zodat hetzelfde afschrift twee keer uploaden geen dubbele regels geeft.
+// Binnen één afschrift blijven gelijke regels wél allebei staan (bijv. twee keer dezelfde locker).
+function zonderAlBestaande(nieuwe){
+  var bestaand={};
+  transacties.forEach(function(t){
+    var k=t.datum+'|'+t.bedrag.toFixed(2)+'|'+(t.omschrijving||'').toLowerCase()+'|'+(t.rekening||'');
+    bestaand[k]=(bestaand[k]||0)+1;
+  });
+  var gezien={};
+  return nieuwe.filter(function(t){
+    var k=t.datum+'|'+t.bedrag.toFixed(2)+'|'+(t.omschrijving||'').toLowerCase()+'|'+(t.rekening||'');
+    gezien[k]=(gezien[k]||0)+1;
+    return gezien[k]>(bestaand[k]||0);
+  });
+}
+
+function leesVisaPdf(file){
+  bankFoutmelding=null;
+  bankInfoMelding='⏳ PDF wordt gelezen...';
+  renderBankTab();
+  var reader=new FileReader();
+  reader.onload=function(e){
+    laadPdfJs().then(function(pdfjsLib){
+      return pdfjsLib.getDocument({data:new Uint8Array(e.target.result)}).promise;
+    }).then(pdfNaarRegels).then(function(regels){
+      var gevonden=parseVisaPdfRegels(regels,file.name);
+      if(!gevonden.length){
+        bankInfoMelding=null;
+        bankFoutmelding='Kon geen transacties herkennen in "'+file.name+'". Deze PDF-functie is gemaakt voor Visa-afschriften van International Card Services. Is het een ander soort afschrift, of een gescande PDF? Upload dan een CSV.';
+      } else {
+        var nieuwe=zonderAlBestaande(gevonden);
+        var overgeslagen=gevonden.length-nieuwe.length;
+        var nAf=nieuwe.filter(function(t){return t.type==='af';}).length;
+        transacties=transacties.concat(nieuwe);
+        matchTransacties();
+        bewaarTransacties();
+        bankInfoMelding='✓ '+nAf+' Visa-afschrijving'+(nAf!==1?'en':'')+' ingelezen uit "'+file.name+'"'+
+          (overgeslagen?' · '+overgeslagen+' regel'+(overgeslagen!==1?'s':'')+' stond'+(overgeslagen!==1?'en':'')+' er al in en '+(overgeslagen!==1?'zijn':'is')+' overgeslagen':'');
+      }
+      renderBankTab();
+      if(activeTab==='bonnen') renderTab();
+    }).catch(function(err){
+      bankInfoMelding=null;
+      bankFoutmelding='De PDF "'+file.name+'" kon niet gelezen worden ('+err.message+').';
+      renderBankTab();
+    });
+  };
+  reader.onerror=function(){
+    bankInfoMelding=null;
+    bankFoutmelding='Het bestand "'+file.name+'" kon niet gelezen worden.';
+    renderBankTab();
+  };
+  reader.readAsArrayBuffer(file);
+}
+// ============ EINDE VISA-PDF ============
 
 function renderBankTab(){
   var el=document.getElementById('tab-content');
@@ -1059,11 +1234,14 @@ function renderBankTab(){
   laatsteTxNietGematcht=transacties.filter(function(t){return t.type==='af'&&!matchesByTxId[t.id]&&!twijfelgevallen[t.id]&&!handmatigTxGematcht[t.id];});
 
   var html='';
-  html+='<input type="file" id="bank-file-input" accept=".csv" style="display:none" onchange="handleBankFile(this)">';
-  html+='<button class="btn-green" onclick="document.getElementById(\'bank-file-input\').click()">↑ Bankafschrift uploaden (CSV)</button>';
+  html+='<input type="file" id="bank-file-input" accept=".csv,.pdf,application/pdf" style="display:none" onchange="handleBankFile(this)">';
+  html+='<button class="btn-green" onclick="document.getElementById(\'bank-file-input\').click()">↑ Bankafschrift uploaden (CSV of Visa-PDF)</button>';
 
   if(bankFoutmelding){
     html+='<div class="err">'+bankFoutmelding+'</div>';
+  }
+  if(bankInfoMelding){
+    html+='<div class="ok">'+bankInfoMelding+'</div>';
   }
 
   if(transacties.length){
@@ -1084,7 +1262,7 @@ function renderBankTab(){
       }).join('')+
     '</div>';
   } else {
-    html+='<div class="tip">💡 <span>Upload een CSV van het bankafschrift om te checken welke bonnen al zijn afgeschreven</span></div>';
+    html+='<div class="tip">💡 <span>Upload een CSV van het bankafschrift, of de PDF van het Visa-afschrift, om te checken welke bonnen al zijn afgeschreven</span></div>';
   }
 
   var twijfelIds=Object.keys(twijfelgevallen).filter(function(txId){
@@ -1730,5 +1908,6 @@ dz.addEventListener('drop',function(e){
 laadBonnen();
 laadTransacties();
 </script>
-</body>
-</html>
+
+
+</body></html>
