@@ -1,56 +1,57 @@
 // api/transacties.js
 //
 // Permanente opslag van bankafschrift-transacties (Upstash Redis REST API).
-// Gebruikt DEZELFDE environment variables als api/bonnen.js:
-//   UPSTASH_REDIS_REST_URL
-//   UPSTASH_REDIS_REST_TOKEN
 //
-// BELANGRIJK: controleer of api/bonnen.js deze exacte REST-aanpak gebruikt
-// (directe fetch-calls naar Upstash) of het @upstash/redis package. Gebruikt
-// bonnen.js het package, pas dit bestand dan in dezelfde stijl aan zodat
-// beide bestanden consistent blijven.
+// Gebruikt dezelfde database als api/bonnen.js (KV_REST_API_URL / KV_REST_API_TOKEN).
+// De oude namen UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN werken ook nog,
+// mochten die ooit (weer) ingesteld worden; die krijgen dan voorrang.
 //
-// Slaat op: { transacties: [...], handmatig: {...}, genegeerd: {...} }
+// Slaat op: { transacties: [...], handmatig: {...}, genegeerd: {...}, txGematcht: {...} }
 
-const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
-const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
 const KEY = 'bankmatching:transacties';
 
-async function upstashGet(key) {
-  const res = await fetch(`${UPSTASH_URL}/get/${key}`, {
-    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` }
+async function redisGet(key) {
+  const res = await fetch(`${REDIS_URL}/get/${key}`, {
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}` }
   });
-  if (!res.ok) throw new Error('Upstash GET fout: ' + res.status);
+  if (!res.ok) throw new Error('Opslag GET fout: ' + res.status);
   const data = await res.json();
-  return data.result; // null als de key nog niet bestaat
+  return data.result; // null als er nog niks is opgeslagen
 }
 
-async function upstashSet(key, valueAsString) {
-  const res = await fetch(`${UPSTASH_URL}/set/${encodeURIComponent(key)}`, {
+async function redisSet(key, valueAsString) {
+  const res = await fetch(`${REDIS_URL}/set/${encodeURIComponent(key)}`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${UPSTASH_TOKEN}`,
+      Authorization: `Bearer ${REDIS_TOKEN}`,
       'Content-Type': 'text/plain'
     },
     body: valueAsString
   });
-  if (!res.ok) throw new Error('Upstash SET fout: ' + res.status);
+  if (!res.ok) throw new Error('Opslag SET fout: ' + res.status);
   return res.json();
 }
 
+function isObject(x) {
+  return x && typeof x === 'object' && !Array.isArray(x);
+}
+
 module.exports = async function handler(req, res) {
-  if (!UPSTASH_URL || !UPSTASH_TOKEN) {
+  if (!REDIS_URL || !REDIS_TOKEN) {
+    console.error('api/transacties.js: geen database-gegevens gevonden (KV_REST_API_URL / KV_REST_API_TOKEN)');
     return res.status(500).json({
-      error: 'UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN ontbreken. Controleer je Vercel environment variables.'
+      error: 'KV_REST_API_URL / KV_REST_API_TOKEN ontbreken. Controleer je Vercel environment variables.'
     });
   }
 
   try {
     if (req.method === 'GET') {
-      const raw = await upstashGet(KEY);
+      const raw = await redisGet(KEY);
       const data = raw
         ? JSON.parse(raw)
-        : { transacties: [], handmatig: {}, genegeerd: {} };
+        : { transacties: [], handmatig: {}, genegeerd: {}, txGematcht: {} };
       return res.status(200).json(data);
     }
 
@@ -58,10 +59,12 @@ module.exports = async function handler(req, res) {
       const body = req.body || {};
       const data = {
         transacties: Array.isArray(body.transacties) ? body.transacties : [],
-        handmatig: body.handmatig && typeof body.handmatig === 'object' ? body.handmatig : {},
-        genegeerd: body.genegeerd && typeof body.genegeerd === 'object' ? body.genegeerd : {}
+        handmatig: isObject(body.handmatig) ? body.handmatig : {},
+        genegeerd: isObject(body.genegeerd) ? body.genegeerd : {},
+        // "Handmatig als gematcht gemarkeerd" bij transacties — werd eerder niet bewaard.
+        txGematcht: isObject(body.txGematcht) ? body.txGematcht : {}
       };
-      await upstashSet(KEY, JSON.stringify(data));
+      await redisSet(KEY, JSON.stringify(data));
       return res.status(200).json({ ok: true });
     }
 
