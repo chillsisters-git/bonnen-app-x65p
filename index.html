@@ -1822,6 +1822,105 @@ function renderAfschriftenTab(){
 }
 // ============ EINDE TABBLAD AFSCHRIFTEN ============
 
+// ============ LIJST ONTBREKENDE BONNEN ============
+// Maakt van "Transacties zonder bon" (met de gekozen maand/kwartaal, bank en zoekterm)
+// een nette lijst om naar de opdrachtgever te sturen: kopiëren, delen (WhatsApp/mail) of PDF.
+var laatsteTxZonderBon=[];
+
+function lijstTitel(){
+  var p=periodeLabel();
+  // Maand gekozen maar geen jaar? Neem het jaar uit de lijst zelf, anders staat er alleen "jul".
+  if(p&&activeJaar==='alle'){
+    var jaren={};laatsteTxZonderBon.forEach(function(t){var j=getJaar(t.datum);if(j)jaren[j]=true;});
+    var js=Object.keys(jaren);
+    if(js.length===1) p+=' '+js[0];
+  }
+  var bank=activeRekeningFilter!=='alle'?activeRekeningFilter.replace(/\s*\(.*\)/,''):'';
+  return 'Bonnen die ik nog mis'+(p||bank?' — '+[p,bank].filter(Boolean).join(' · '):'');
+}
+function groepeerPerBank(lijst){
+  var groepen={};
+  lijst.forEach(function(t){
+    var b=(matchRekening(t.rekening)||(t.rekening?'Rekening …'+t.rekening:'Onbekende rekening')).replace(/\s*\(.*\)/,'');
+    (groepen[b]=groepen[b]||[]).push(t);
+  });
+  return groepen;
+}
+function tekstOntbrekend(){
+  var lijst=laatsteTxZonderBon.slice().sort(function(a,b){return parseDatumNL(a.datum)-parseDatumNL(b.datum);});
+  var totaal=lijst.reduce(function(s,t){return s+t.bedrag;},0);
+  var groepen=groepeerPerBank(lijst);
+  var regels=[lijstTitel(),'('+lijst.length+' stuk'+(lijst.length!==1?'s':'')+', samen '+fmt(totaal)+')',''];
+  Object.keys(groepen).forEach(function(bank){
+    regels.push(bank+':');
+    groepen[bank].forEach(function(t){
+      regels.push('• '+t.datum.slice(0,5)+' · '+(t.omschrijving||'—')+' · '+fmt(t.bedrag));
+    });
+    regels.push('');
+  });
+  regels.push('Kun je van deze betalingen de bon of factuur sturen (foto of mail is prima)? Is iets privé, laat het me dan even weten.');
+  return regels.join('\n');
+}
+function toonLijstOntbrekend(){
+  var oud=document.getElementById('lijst-overlay');
+  if(oud) oud.remove();
+  var ov=document.createElement('div');
+  ov.id='lijst-overlay';
+  ov.className='confirm-overlay show';
+  ov.innerHTML='<div class="confirm-box" style="max-width:380px;text-align:left">'+
+    '<h3 style="text-align:center">📤 Lijst voor opdrachtgever</h3>'+
+    '<p style="margin-bottom:8px">Past zich aan aan de maand en bank die je gekozen hebt.</p>'+
+    '<textarea id="lijst-tekst" readonly style="width:100%;height:260px;font-size:12px;border:1px solid #ddd;border-radius:8px;padding:8px;font-family:inherit;background:#fafafa">'+esc(tekstOntbrekend())+'</textarea>'+
+    '<div id="lijst-ok" class="ok" style="display:none;margin-top:8px"></div>'+
+    '<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">'+
+      '<button class="btn-green" style="margin:0" onclick="kopieerLijstOntbrekend()">📋 Kopiëren</button>'+
+      (navigator.share?'<button class="btn-sec" style="margin:0" onclick="deelLijstOntbrekend()">💬 Delen (WhatsApp, mail…)</button>':'')+
+      '<button class="btn-sec" style="margin:0" onclick="printLijstOntbrekend()">🖨 Printen / opslaan als PDF</button>'+
+      '<button class="confirm-cancel" style="padding:10px;border-radius:10px;border:none;font-size:14px;cursor:pointer" onclick="document.getElementById(\'lijst-overlay\').remove()">Sluiten</button>'+
+    '</div></div>';
+  ov.addEventListener('click',function(e){if(e.target===ov) ov.remove();});
+  document.body.appendChild(ov);
+}
+function kopieerLijstOntbrekend(){
+  var tekst=tekstOntbrekend();
+  var klaar=function(){var ok=document.getElementById('lijst-ok');ok.textContent='✓ Gekopieerd — plak het in WhatsApp of je mail';ok.style.display='block';};
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(tekst).then(klaar).catch(function(){
+      var ta=document.getElementById('lijst-tekst');ta.removeAttribute('readonly');ta.select();document.execCommand('copy');ta.setAttribute('readonly','');klaar();
+    });
+  } else {
+    var ta=document.getElementById('lijst-tekst');ta.removeAttribute('readonly');ta.select();document.execCommand('copy');ta.setAttribute('readonly','');klaar();
+  }
+}
+function deelLijstOntbrekend(){
+  navigator.share({title:lijstTitel(),text:tekstOntbrekend()}).catch(function(){});
+}
+function printLijstOntbrekend(){
+  var lijst=laatsteTxZonderBon.slice().sort(function(a,b){return parseDatumNL(a.datum)-parseDatumNL(b.datum);});
+  var totaal=lijst.reduce(function(s,t){return s+t.bedrag;},0);
+  var groepen=groepeerPerBank(lijst);
+  var tabellen=Object.keys(groepen).map(function(bank){
+    return '<h2>'+esc(bank)+'</h2><table><tr><th>Datum</th><th>Omschrijving</th><th style="text-align:right">Bedrag</th><th>Bon gevonden</th></tr>'+
+      groepen[bank].map(function(t){return '<tr><td>'+esc(t.datum)+'</td><td>'+esc(t.omschrijving||'—')+'</td><td style="text-align:right">'+fmt(t.bedrag)+'</td><td class="vak">☐</td></tr>';}).join('')+
+      '</table>';
+  }).join('');
+  var w=window.open('','_blank');
+  if(!w){alert('Pop-up geblokkeerd — sta pop-ups toe voor deze site en probeer het opnieuw.');return;}
+  w.document.write('<!doctype html><html lang="nl"><head><meta charset="utf-8"><title>'+esc(lijstTitel())+'</title><style>'+
+    'body{font-family:-apple-system,Segoe UI,sans-serif;color:#111;margin:32px;font-size:13px}h1{font-size:18px;margin:0 0 4px}'+
+    '.sub{color:#666;margin-bottom:18px}h2{font-size:14px;margin:18px 0 6px}table{width:100%;border-collapse:collapse}'+
+    'th,td{border-bottom:1px solid #ddd;padding:6px 4px;text-align:left}th{font-size:11px;color:#666;text-transform:uppercase}'+
+    '.vak{text-align:center;font-size:16px}p.noot{margin-top:22px;color:#444}</style></head><body>'+
+    '<h1>'+esc(lijstTitel())+'</h1><div class="sub">'+lijst.length+' betaling'+(lijst.length!==1?'en':'')+' zonder bon · samen '+fmt(totaal)+' · Cross 65 Projects</div>'+
+    tabellen+
+    '<p class="noot">Graag van deze betalingen de bon of factuur (foto of mail is prima). Is iets privé, zet er dan een P bij.</p>'+
+    '</body></html>');
+  w.document.close();
+  w.focus();
+  setTimeout(function(){w.print();},300);
+}
+// ============ EINDE LIJST ONTBREKENDE BONNEN ============
+
 function renderBankTab(){
   var el=document.getElementById('tab-content');
   var matchableBonnen=gefilterdeBonnen().filter(function(b){
@@ -1932,7 +2031,11 @@ function renderBankTab(){
     }).join('');
   }
 
+  laatsteTxZonderBon=txNietGematcht;
   html+='<div class="section-title">Transacties zonder bon ('+txNietGematcht.length+')</div>';
+  if(txNietGematcht.length){
+    html+='<button class="btn-sec" style="margin-bottom:10px" onclick="toonLijstOntbrekend()">📤 Lijst ontbrekende bonnen voor opdrachtgever</button>';
+  }
   if(!txAfschrijvingen.length){
     html+='<div class="empty">Nog geen bankafschrift geüpload</div>';
   } else if(!txNietGematcht.length){
