@@ -152,7 +152,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
       <div class="ok" id="form-ok" style="display:none"></div>
       <div class="ai-hint" id="ai-hint" style="display:none">✨ AI heeft uitgelezen — controleer en sla op</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div><label>Datum</label><input type="text" id="f-datum" placeholder="DD-MM-JJJJ"></div>
+        <div><label>Datum</label><input type="text" id="f-datum" placeholder="DD-MM-JJJJ" oninput="controleerBankDatum()"></div>
         <div><label>Zakelijk / Privé</label>
           <select id="f-type">
             <option value="Zakelijk">Zakelijk</option>
@@ -160,10 +160,13 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
           </select>
         </div>
       </div>
+      <div id="form-bankcheck" style="display:none;font-size:12px;border-radius:8px;padding:8px 10px;margin-top:8px"></div>
+      <label>Tijd op de bon <span style="color:#bbb">(optioneel — helpt bij twee aankopen op één dag)</span></label>
+      <input type="text" id="f-tijd" placeholder="UU:MM">
       <label>Omschrijving</label>
       <input type="text" id="f-omschrijving">
       <label>Bedrag incl. BTW (€)</label>
-      <input type="text" id="f-bedrag" oninput="herbereken()">
+      <input type="text" id="f-bedrag" oninput="herbereken();controleerBankDatum()">
       <label>BTW percentage</label>
       <div class="btw-pct-row">
         <button class="btw-pct-btn" id="btw-0" onclick="setBTWpct(0)">0%</button>
@@ -227,7 +230,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
       </select>
       <input type="text" id="f-categorie-anders" placeholder="Vul eigen categorie in" style="display:none;margin-top:6px">
       <label>Betaald via</label>
-      <select id="f-betaald" onchange="checkAndersVeld()">
+      <select id="f-betaald" onchange="checkAndersVeld();controleerBankDatum()">
         <option value="BUNQ Zakelijk (7361)">BUNQ Zakelijk (7361)</option>
         <option value="VISA (5749)">VISA (5749)</option>
         <option value="BUNQ Privé (4183)">BUNQ Privé (4183)</option>
@@ -236,6 +239,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
         <option value="Anders">Anders, namelijk...</option>
       </select>
       <input type="text" id="f-betaald-anders" placeholder="Bijv. creditcard zakelijk" style="display:none;margin-top:6px">
+      <div id="betaald-hint" style="display:none;font-size:11px;color:#0f6e56;margin-top:4px"></div>
       <label style="display:flex;align-items:center;gap:6px;margin-top:14px;cursor:pointer">
         <input type="checkbox" id="f-herhalend" style="width:auto;margin:0">
         <span style="font-size:12px;color:#555;text-transform:none;letter-spacing:normal">🔁 Herhalende post (bijv. lease/abonnement) — blijft koppelbaar aan elke nieuwe afschrijving</span>
@@ -315,6 +319,8 @@ var previewSrc=null;
 var activeBTWpct=21;
 var btwHandmatigMode=false;
 var editId=null;
+var huidigeBonCijfers=''; // cijfers die de AI op de bon vond (rekening- of kaartnummer)
+var betaaldHint='';       // uitleg hoe "Betaald via" is bepaald, getoond onder het veld
 var pendingDelete=null; // {type:'bon'|'tx'|'bonnen-bulk'|'transacties-bulk', id:...}
 var geselecteerdeBonnen={}; // bonId -> true
 var geselecteerdeTransacties={}; // txId -> true
@@ -652,7 +658,9 @@ function bankBadge(bon){
     if(isVolledigGematcht(bon)){
       var unlinkBtn=txIds.length===1?
         ' <span onclick="event.stopPropagation();ontkoppelMatch('+bon.id+',\''+txIds[0]+'\')" style="cursor:pointer;color:#c0392b;font-size:11px" title="Ontkoppelen">✕</span>':'';
-      return ' · <span class="badge badge-zakelijk">🔗 Gematcht'+(txIds.length>1?' ('+txIds.length+'x)':'')+'</span>'+unlinkBtn;
+      var txDatum='';
+      if(txIds.length===1){var gt=transacties.find(function(t){return t.id===txIds[0];});if(gt) txDatum=' · '+gt.datum.slice(0,5);}
+      return ' · <span class="badge badge-zakelijk">🔗 Gematcht'+(txIds.length>1?' ('+txIds.length+'x)':txDatum)+'</span>'+unlinkBtn;
     }
     return ' · <span class="badge badge-prive">🔶 Deels gematcht ('+fmt(gekoppeldTotaal(bon.id))+' / '+fmt(bon.bedrag)+')</span>';
   }
@@ -821,24 +829,62 @@ function matchTransacties(){
   // Herhalende posten (lease/abonnement) sluiten we uit van automatische matching —
   // die koppel je bewust elke keer opnieuw handmatig aan de nieuwste afschrijving.
   var beschikbareBonnen=bonnen.filter(function(b){return BEKENDE_REKENINGEN.indexOf(b.betaald)>=0&&!matchesByBonId[b.id]&&!b.herhalend;});
-  transacties.forEach(function(tx){
-    if(tx.type!=='af') return;
-    if(matchesByTxId[tx.id]) return; // al (handmatig) gekoppeld
-    var genegeerdeBonIds=genegeerd[tx.id]||[];
-    var kandidaten=beschikbareBonnen.filter(function(b){
-      if(matchesByBonId[b.id]) return false;
-      if(genegeerdeBonIds.indexOf(b.id)>=0) return false; // eerder handmatig ontkoppeld, niet opnieuw automatisch koppelen
-      if(Math.abs(b.bedrag-tx.bedrag)>0.01) return false;
-      var verschil=dagVerschil(b.datum,tx.datum);
-      return verschil!==null&&verschil<=3;
+  var paren=onthoudenNamen();
+  var openTx=transacties.filter(function(tx){return tx.type==='af'&&!matchesByTxId[tx.id];});
+
+  // Alle mogelijke paren (zelfde bedrag, zelfde bank, datum hooguit 3 dagen verschil).
+  // We koppelen het DICHTSTBIJZIJNDE paar eerst: een bon van 23 juli gaat naar de
+  // afschrijving van 23 juli, niet naar die van 26 juli die toevallig eerder in de lijst stond.
+  function verzamelParen(maxDagen,alleenOnthouden){
+    var lijst=[];
+    openTx.forEach(function(tx){
+      if(matchesByTxId[tx.id]||twijfel[tx.id]) return;
+      var genegeerdeBonIds=genegeerd[tx.id]||[];
+      beschikbareBonnen.forEach(function(b){
+        if(matchesByBonId[b.id]) return;
+        if(genegeerdeBonIds.indexOf(b.id)>=0) return; // eerder handmatig ontkoppeld
+        if(Math.abs(b.bedrag-tx.bedrag)>0.01) return;
+        if(!bankKlopt(b,tx)) return; // de bank moet kloppen
+        var v=dagVerschil(b.datum,tx.datum);
+        if(v===null||v>maxDagen) return;
+        var onthouden=isOnthouden(paren,b,tx);
+        if(alleenOnthouden&&!onthouden) return;
+        var opNaam=onthouden||naamLijktOp(b.omschrijving,tx.omschrijving);
+        lijst.push({tx:tx,bon:b,dagen:v,opNaam:opNaam});
+      });
     });
-    if(kandidaten.length===1){
-      matchesByBonId[kandidaten[0].id]=[tx.id];
-      matchesByTxId[tx.id]=kandidaten[0].id;
-    } else if(kandidaten.length>1){
-      twijfel[tx.id]=kandidaten.map(function(b){return b.id;});
-    }
-  });
+    // Een bekende/gelijkende naam gaat voor; daarna het kleinste datumverschil.
+    lijst.sort(function(a,b){return ((b.opNaam?1:0)-(a.opNaam?1:0))||(a.dagen-b.dagen);});
+    return lijst;
+  }
+  function koppelParen(lijst){
+    lijst.forEach(function(p){
+      if(matchesByTxId[p.tx.id]||matchesByBonId[p.bon.id]||twijfel[p.tx.id]) return;
+      // Even goede alternatieven voor deze transactie (zelfde datumverschil en naam-status)?
+      // Dan niet gokken maar als twijfelgeval tonen.
+      var gelijk=lijst.filter(function(q){
+        return q.tx===p.tx&&q.dagen===p.dagen&&q.opNaam===p.opNaam&&!matchesByBonId[q.bon.id];
+      });
+      if(gelijk.length>1){
+        // Staan er evenveel even goede transacties voor deze bonnen? (bijv. twee koffie
+        // op dezelfde dag, twee bonnen) — dan maakt het niet uit welke bij welke: gewoon koppelen.
+        var bonIds=gelijk.map(function(q){return q.bon.id;});
+        var concurrenten=lijst.filter(function(q){
+          return bonIds.indexOf(q.bon.id)>=0&&q.dagen===p.dagen&&!matchesByTxId[q.tx.id]&&!twijfel[q.tx.id];
+        }).map(function(q){return q.tx.id;}).filter(function(id,i,arr){return arr.indexOf(id)===i;});
+        var bonnenGelijk=gelijk.every(function(q){return q.bon.datum===p.bon.datum;});
+        if(!(bonnenGelijk&&concurrenten.length>=gelijk.length)){
+          twijfel[p.tx.id]=bonIds;
+          return;
+        }
+      }
+      matchesByBonId[p.bon.id]=[p.tx.id];
+      matchesByTxId[p.tx.id]=p.bon.id;
+    });
+  }
+  koppelParen(verzamelParen(3,false));
+  // Daarna: een eerder gekoppelde naam (zelfde bedrag en bank) mag tot 14 dagen verschil.
+  koppelParen(verzamelParen(14,true));
   twijfelgevallen=twijfel;
   return twijfel;
 }
@@ -953,6 +999,63 @@ function kiesKoppelMaand(kind,ownId,maandJaar){
   filterKoppelOpties(kind,ownId,input?input.value:'',true);
 }
 
+// ============ SLIMME VOORSTELLEN EN ONTHOUDEN NAMEN ============
+// Winkels heten op de bon vaak anders dan op het afschrift ("Hagen" vs. "XYZ BV",
+// of met een betaaldienst ervoor zoals "Zettle_*"). Daarom:
+//  1. bij het handmatig koppelen staan de meest waarschijnlijke kandidaten bovenaan (⭐)
+//  2. de app onthoudt welke bon-naam bij welke afschrift-naam hoort, zodra je ze één keer
+//     met de hand aan elkaar koppelt, en gebruikt dat bij het automatisch koppelen.
+// De "onthouden namen" worden afgeleid uit je handmatige koppelingen, die al bewaard worden.
+var BETAALDIENST_PREFIX=/^\s*(i?zettle|paypal|sumup|sq|ccv|mgp|pp|mollie|adyen|stripe|klarna|www)\s*[_*.\s]*\*?\s*/i;
+function naamSleutel(s){
+  var t=(s||'').split(' - ')[0];
+  t=t.replace(BETAALDIENST_PREFIX,'').toLowerCase();
+  t=t.replace(/[^a-zà-ÿ]+/g,' ').trim();
+  var woorden=t.split(' ').filter(function(w){return w.length>=2;});
+  return woorden.slice(0,2).join(' ');
+}
+function naamLijktOp(a,b){
+  var ka=naamSleutel(a),kb=naamSleutel(b);
+  if(!ka||!kb) return false;
+  if(ka===kb) return true;
+  var wa=ka.split(' ')[0],wb=kb.split(' ')[0];
+  var eerste=function(w){return w.length>=4&&w!=='the'&&w!=='de';};
+  return eerste(wa)&&eerste(wb)&&(wa.indexOf(wb)===0||wb.indexOf(wa)===0);
+}
+function onthoudenNamen(){
+  var paren={};
+  Object.keys(handmatigeKoppelingen).forEach(function(txId){
+    var tx=transacties.find(function(t){return t.id===txId;});
+    var bon=bonnen.find(function(b){return b.id===handmatigeKoppelingen[txId];});
+    if(!tx||!bon) return;
+    var kb=naamSleutel(bon.omschrijving),kt=naamSleutel(tx.omschrijving);
+    if(kb&&kt) paren[kb+'|'+kt]=true;
+  });
+  return paren;
+}
+function isOnthouden(paren,bon,tx){
+  return !!paren[naamSleutel(bon.omschrijving)+'|'+naamSleutel(tx.omschrijving)];
+}
+function bankKlopt(bon,tx){
+  var r=matchRekening(tx.rekening);
+  return !r||bon.betaald===r;
+}
+// Geeft een voorstel terug als deze bon en transactie waarschijnlijk bij elkaar horen.
+function voorstelVoor(bon,tx,paren){
+  if(!bon||!tx) return null;
+  var zelfdeBedrag=Math.abs((bon.bedrag||0)-(tx.bedrag||0))<=0.01;
+  var dagen=dagVerschil(bon.datum,tx.datum);
+  var bank=bankKlopt(bon,tx);
+  if(isOnthouden(paren,bon,tx)&&(dagen===null||dagen<=45)) return {rang:0,reden:'eerder gekoppeld',dagen:dagen};
+  if(!bank) return null;
+  if(zelfdeBedrag&&dagen!==null&&dagen<=7) return {rang:1,reden:'zelfde bedrag',dagen:dagen};
+  if(zelfdeBedrag&&naamLijktOp(bon.omschrijving,tx.omschrijving)&&dagen!==null&&dagen<=30) return {rang:2,reden:'zelfde bedrag en naam',dagen:dagen};
+  if(naamLijktOp(bon.omschrijving,tx.omschrijving)&&dagen!==null&&dagen<=7) return {rang:3,reden:'lijkt op naam',dagen:dagen};
+  if(zelfdeBedrag&&dagen!==null&&dagen<=21) return {rang:4,reden:'zelfde bedrag',dagen:dagen};
+  return null;
+}
+// ============ EINDE VOORSTELLEN ============
+
 function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
   var term=(zoektekst||'').toLowerCase().trim();
   var containerId=(kind==='tx'?'opties-tx-':'opties-bon-')+ownId;
@@ -984,6 +1087,24 @@ function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
     if(!db) return -1;
     return db-da;
   });
+  // Slimme voorstellen bovenaan: zelfde bedrag/bank/datum dichtbij, of eerder gekoppelde naam.
+  var eigen=kind==='tx'?
+    transacties.find(function(t){return String(t.id)===String(ownId);}):
+    bonnen.find(function(b){return String(b.id)===String(ownId);});
+  var paren=onthoudenNamen();
+  var voorstellen={};
+  if(eigen){
+    treffers.forEach(function(item){
+      var v=kind==='tx'?voorstelVoor(item,eigen,paren):voorstelVoor(eigen,item,paren);
+      if(v) voorstellen[item.id]=v;
+    });
+    var metVoorstel=treffers.filter(function(i){return voorstellen[i.id];}).sort(function(a,b){
+      var va=voorstellen[a.id],vb=voorstellen[b.id];
+      return (va.rang-vb.rang)||((va.dagen==null?99:va.dagen)-(vb.dagen==null?99:vb.dagen));
+    });
+    var zonder=treffers.filter(function(i){return !voorstellen[i.id];});
+    treffers=metVoorstel.concat(zonder);
+  }
 
   var maandChips=beschikbareMaanden(alles).map(function(mj){
     return '<button class="btw-pct-btn'+(maandActief===mj?' active':'')+'" style="display:inline-block;width:auto;padding:4px 9px;margin:0 4px 4px 0;font-size:11px" onmousedown="event.preventDefault()" onclick="kiesKoppelMaand(\''+kind+'\',\''+ownId+'\',\''+mj+'\')">'+maandLabel(mj)+'</button>';
@@ -1001,11 +1122,15 @@ function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
   var meerKnop=restant>0?
     '<button class="btw-pct-btn" style="display:block;width:100%;margin-top:2px;font-size:12px;font-weight:500" onclick="toonMeerKoppelOpties(\''+kind+'\',\''+ownId+'\')">↓ + '+restant+' meer tonen</button>':'';
   container.innerHTML=maandRow+getoond.map(function(item){
-    var label=item.datum+' · '+(item.omschrijving||'—')+' · '+fmt(item.bedrag);
+    // Toon de bank erbij, zodat je bij handmatig koppelen ziet of de rekening klopt.
+    var bank=item.betaald?item.betaald.replace(/\s*\(.*\)/,''):(item.rekening?(matchRekening(item.rekening)||'rek. …'+item.rekening).replace(/\s*\(.*\)/,''):'');
+    var label=item.datum+' · '+(item.omschrijving||'—')+' · '+fmt(item.bedrag)+(bank?' · '+bank:'');
+    var v=voorstellen[item.id];
+    if(v) label='<span style="color:#854f0b;font-weight:600">⭐ voorstel · '+v.reden+'</span><br>'+label;
     var onclickAttr=kind==='tx'?
       'koppelHandmatig(\''+ownId+'\','+item.id+')':
       'koppelHandmatig(\''+item.id+'\','+ownId+')';
-    return '<button class="btw-pct-btn" style="display:block;width:100%;margin-bottom:4px;text-align:left;font-size:12px" onclick="'+onclickAttr+'">'+label+'</button>';
+    return '<button class="btw-pct-btn" style="display:block;width:100%;margin-bottom:4px;text-align:left;font-size:12px'+(v?';background:#fffaf0;border-color:#f0d9a8':'')+'" onclick="'+onclickAttr+'">'+label+'</button>';
   }).join('')+meerKnop;
   container.style.cssText='display:block;max-height:320px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:4px;margin-top:4px';
 }
@@ -1461,8 +1586,12 @@ function lijktOpElkaar(a,b){
 //  - de omschrijving vrijwel gelijk is en de datums binnen 10 dagen liggen
 //    (vangt ook een datum die de AI net anders heeft uitgelezen).
 // Herhalende posten en paren die je zelf als "geen dubbel" hebt gemarkeerd tellen niet mee.
+function verschillendeTijd(a,b){
+  return !!(a.tijd&&b.tijd&&a.tijd!==b.tijd);
+}
 function zijnMogelijkDubbel(a,b){
   if(a.id===b.id) return false;
+  if(verschillendeTijd(a,b)) return false; // zelfde dag en bedrag, maar andere tijd = twee aankopen
   if(Math.abs((a.bedrag||0)-(b.bedrag||0))>0.01) return false;
   if(!(a.bedrag>0)) return false;
   if(a.herhalend||b.herhalend) return false;
@@ -1536,7 +1665,15 @@ function vraagVerwijderKopie(id){
 
 // Zoekt bij het scannen of een nieuwe bon er al lijkt te staan.
 function zoekBestaandeBon(nieuw){
-  return bonnen.filter(function(b){return b.id!==nieuw.id&&zijnMogelijkDubbel(nieuw,b);});
+  // Alleen bij dezelfde datum en hetzelfde bedrag — anders krijg je bij terugkerende kleine
+  // aankopen (koffie van € 3,22) steeds een onterechte waarschuwing.
+  return bonnen.filter(function(b){
+    if(b.id===nieuw.id||b.herhalend) return false;
+    if(verschillendeTijd(b,nieuw)) return false;
+    if(Math.abs((b.bedrag||0)-(nieuw.bedrag||0))>0.01) return false;
+    var v=dagVerschil(b.datum,nieuw.datum);
+    return v===0||(v===null&&lijktOpElkaar(b.omschrijving,nieuw.omschrijving));
+  });
 }
 
 // ---------- Weergave ----------
@@ -1903,6 +2040,7 @@ function bewerkTransactieOmschrijving(txId){
 }
 
 function maakBonVanTransactie(txId){
+  huidigeBonCijfers='';
   var tx=transacties.find(function(t){return t.id===txId;});
   if(!tx) return;
   editId=null;
@@ -1965,6 +2103,10 @@ function bewerkBon(id){
   document.getElementById('header-title').textContent='Bon bewerken';
   document.getElementById('form-dubbel').style.display='none';
   document.getElementById('f-datum').value=bon.datum;
+  document.getElementById('f-tijd').value=bon.tijd||'';
+  huidigeBonCijfers=bon.bonCijfers||'';
+  document.getElementById('betaald-hint').style.display='none';
+  document.getElementById('form-bankcheck').style.display='none';
   document.getElementById('f-omschrijving').value=bon.omschrijving;
   document.getElementById('f-type').value=bon.type;
   document.getElementById('f-bedrag').value=bon.bedrag.toFixed(2);
@@ -2140,10 +2282,11 @@ function handleFile(input){
       var btw=parsed.btw_bedrag||0;
       var pct=21;
       if(bedrag>0){var calc=Math.round((btw/bedrag)*100*100)/100;if(calc<1)pct=0;else if(calc<12)pct=9;else pct=21;}
-      var betaald=matchRekening(parsed.rekening_cijfers);
-      if(!betaald&&parsed.rekening_cijfers)betaald='Anders:...'+parsed.rekening_cijfers;
-      else if(!betaald)betaald='BUNQ Zakelijk (7361)';
-      showForm({datum:parsed.datum||'',omschrijving:parsed.omschrijving||'',type:'Zakelijk',bedrag:bedrag.toFixed(2),btw:btw.toFixed(2),categorie:cat,betaald:betaald,opmerking:parsed.opmerking||''},pct,null,true);
+      huidigeBonCijfers=parsed.rekening_cijfers?String(parsed.rekening_cijfers).replace(/[^0-9]/g,'').slice(-4):'';
+      var herkend=bepaalBetaaldVia(huidigeBonCijfers,parsed.datum,bedrag);
+      var betaald=herkend.betaald;
+      betaaldHint=herkend.hint;
+      showForm({datum:parsed.datum||'',tijd:normaliseerTijd(parsed.tijd),omschrijving:parsed.omschrijving||'',type:'Zakelijk',bedrag:bedrag.toFixed(2),btw:btw.toFixed(2),categorie:cat,betaald:betaald,opmerking:parsed.opmerking||''},pct,null,true);
     }).catch(function(e){
       showForm({datum:'',omschrijving:'',type:'Zakelijk',bedrag:'0.00',btw:'0.00',categorie:'Algemene kosten',betaald:'BUNQ Zakelijk (7361)',opmerking:''},21,'AI kon de bon niet uitlezen ('+e.message+'). Vul handmatig in.',false);
     });
@@ -2174,10 +2317,15 @@ function showForm(d,pct,err,aiOk){
   activeBTWpct=pct||21;
   [0,9,21].forEach(function(p){document.getElementById('btw-'+p).classList.toggle('active',p===activeBTWpct);});
   document.getElementById('btw-anders').value='';
+  document.getElementById('f-tijd').value=d.tijd||'';
+  var bh=document.getElementById('betaald-hint');
+  if(betaaldHint){bh.textContent=betaaldHint;bh.style.display='block';}else{bh.style.display='none';}
+  betaaldHint='';
   dubbelBevestigd=false;
   document.getElementById('form-dubbel').style.display='none';
+  controleerBankDatum();
   if(!editId){
-    var bestaand=zoekBestaandeBon({id:-1,datum:d.datum,bedrag:parseAmt(d.bedrag),omschrijving:d.omschrijving,herhalend:!!d.herhalend});
+    var bestaand=zoekBestaandeBon({id:-1,datum:d.datum,tijd:d.tijd||'',bedrag:parseAmt(d.bedrag),omschrijving:d.omschrijving,herhalend:!!d.herhalend});
     if(bestaand.length){toonDubbelWaarschuwing(bestaand);dubbelBevestigd=true;}
   }
 }
@@ -2203,6 +2351,92 @@ function moetEerstWaarschuwen(bon){
   return true;
 }
 
+
+// Tijd netjes als HH:MM, of '' als er niets bruikbaars staat.
+function normaliseerTijd(t){
+  var m=(t||'').toString().match(/(\d{1,2})[:.h](\d{2})/);
+  if(!m) return '';
+  var u=parseInt(m[1],10),mi=parseInt(m[2],10);
+  if(u>23||mi>59) return '';
+  return pad2(u)+':'+pad2(mi);
+}
+
+// Na het scannen: past de bon bij een afschrijving zonder bon? En zo niet op deze datum,
+// staat er dan wel een met hetzelfde bedrag op een andere dag? Dan is de datum waarschijnlijk
+// verkeerd uitgelezen — met één tik aan te passen.
+function controleerBankDatum(){
+  var el=document.getElementById('form-bankcheck');
+  if(!el) return;
+  el.style.display='none';
+  if(editId||!transacties.length) return;
+  var datum=document.getElementById('f-datum').value.trim();
+  var bedrag=parseAmt(document.getElementById('f-bedrag').value);
+  var betaald=getBetaaldWaarde();
+  if(!(bedrag>0)||BEKENDE_REKENINGEN.indexOf(betaald)<0) return;
+  var open=transacties.filter(function(t){
+    if(t.type!=='af'||matchesByTxId[t.id]||handmatigTxGematcht[t.id]) return false;
+    if(Math.abs(t.bedrag-bedrag)>0.01) return false;
+    var r=matchRekening(t.rekening);
+    return !r||r===betaald;
+  });
+  if(!open.length) return;
+  var zelfdeDag=open.filter(function(t){return dagVerschil(t.datum,datum)===0;});
+  if(zelfdeDag.length){
+    el.style.cssText='display:block;font-size:12px;border-radius:8px;padding:8px 10px;margin-top:8px;background:#e6f7f1;color:#0f6e56';
+    el.innerHTML='✓ Past bij de afschrijving van '+fmt(bedrag)+' op '+esc(datum)+(zelfdeDag.length>1?' ('+zelfdeDag.length+' op die dag)':'')+'.';
+    return;
+  }
+  var dichtbij=open.map(function(t){return {t:t,v:dagVerschil(t.datum,datum)};})
+    .filter(function(x){return x.v!==null&&x.v<=10;})
+    .sort(function(a,b){return a.v-b.v;}).slice(0,3);
+  if(!dichtbij.length) return;
+  el.style.cssText='display:block;font-size:12px;border-radius:8px;padding:8px 10px;margin-top:8px;background:#fef3e2;color:#854f0b';
+  el.innerHTML='<b>Klopt de datum '+esc(datum||'(leeg)')+'?</b> Er staat een afschrijving van '+fmt(bedrag)+' zonder bon op:'+
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'+dichtbij.map(function(x){
+      return '<button class="btw-pct-btn" style="flex:none;width:auto;padding:5px 10px;font-size:12px" onclick="zetFormDatum(\''+x.t.datum+'\')">Zet op '+x.t.datum+'</button>';
+    }).join('')+'</div>';
+}
+function zetFormDatum(d){
+  document.getElementById('f-datum').value=d;
+  dubbelBevestigd=false;
+  document.getElementById('form-dubbel').style.display='none';
+  controleerBankDatum();
+}
+
+
+// Bepaalt "Betaald via" na het scannen. Op pinbonnen staat vaak alleen "Maestro" met een
+// stukje KAARTnummer, niet het rekeningnummer. Volgorde:
+//  1. cijfers zijn een bekend rekeningnummer  → die rekening
+//  2. cijfers kwamen eerder voor op een bon waar jij de rekening hebt ingesteld → die rekening
+//     (de app leert zo vanzelf welk kaartnummer bij welke rekening hoort)
+//  3. er staat een afschrijving zonder bon met hetzelfde bedrag, dicht bij de datum → die rekening
+//  4. anders BUNQ Zakelijk
+function bepaalBetaaldVia(cijfers,datum,bedrag){
+  var r=matchRekening(cijfers);
+  if(r) return {betaald:r,hint:''};
+  if(cijfers){
+    var geleerd={};
+    bonnen.forEach(function(b){
+      if(b.bonCijfers===cijfers&&BEKENDE_REKENINGEN.indexOf(b.betaald)>=0) geleerd[b.betaald]=(geleerd[b.betaald]||0)+1;
+    });
+    var opties=Object.keys(geleerd).sort(function(a,b){return geleerd[b]-geleerd[a];});
+    if(opties.length) return {betaald:opties[0],hint:'✓ Herkend aan kaartnummer …'+cijfers+' (eerder zo ingesteld)'};
+  }
+  if(bedrag>0&&datum){
+    var kandidaten=transacties.filter(function(t){
+      if(t.type!=='af'||matchesByTxId[t.id]||handmatigTxGematcht[t.id]) return false;
+      if(Math.abs(t.bedrag-bedrag)>0.01) return false;
+      var v=dagVerschil(t.datum,datum);
+      return v!==null&&v<=3&&matchRekening(t.rekening);
+    });
+    var reks={};
+    kandidaten.forEach(function(t){reks[matchRekening(t.rekening)]=true;});
+    var lijst=Object.keys(reks);
+    if(lijst.length===1) return {betaald:lijst[0],hint:'✓ Herkend via het bankafschrift (afschrijving van '+fmt(bedrag)+')'};
+  }
+  return {betaald:'BUNQ Zakelijk (7361)',hint:cijfers?'Kaartnummer …'+cijfers+' nog onbekend — pas aan als het niet BUNQ Zakelijk is; de app onthoudt het':''};
+}
+
 function getFormData(){
   return {
     datum:document.getElementById('f-datum').value,
@@ -2214,6 +2448,8 @@ function getFormData(){
     betaald:getBetaaldWaarde(),
     herhalend:!!document.getElementById('f-herhalend').checked,
     opmerking:document.getElementById('f-opmerking').value,
+    tijd:normaliseerTijd(document.getElementById('f-tijd').value),
+    bonCijfers:huidigeBonCijfers||'',
     heeftFoto:!!previewSrc,
     id:editId||Date.now()
   };
