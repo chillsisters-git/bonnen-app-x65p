@@ -72,11 +72,12 @@ Lees de volgende gegevens uit de bon/factuur en geef ze terug als JSON:
 3. bedrag_incl — totaalbedrag inclusief BTW als getal (bijv. 24.95)
 4. btw_bedrag — BTW bedrag als getal (bijv. 4.33). Als het niet op de bon staat, bereken het dan op basis van 21%.
 5. categorie — kies de meest passende uit deze lijst (gebruik exact dezelfde schrijfwijze): ${CATEGORIEEN_PROMPT}. Als niets goed past, gebruik "Algemene kosten".
-6. rekening_cijfers — zoek op de bon naar een rekeningnummer of IBAN. Geef de laatste 4 cijfers terug als tekst (bijv. "7361"). 
+6. rekening_cijfers — zoek op de bon naar een rekeningnummer, IBAN of (bij pinbetalingen, bijv. "Maestro", "V PAY", "Debit Mastercard") het kaartnummer, vaak deels verborgen zoals "xxxx xxxx 1234". Geef de laatste 4 cijfers terug als tekst (bijv. "7361"). 
    De bekende rekeningen zijn:
 ${REKENINGEN_PROMPT}
    Als er geen rekeningnummer op de bon staat, geef dan null terug.
 7. opmerking — eventuele relevante opmerking, anders leeg
+8. tijd — het tijdstip van de aankoop zoals op de bon staat, in formaat HH:MM (24-uurs). Als er geen tijd op staat, geef null terug.
 Geef ALLEEN een JSON object terug, geen uitleg of markdown. Formaat:
 {
   "datum": "DD-MM-JJJJ",
@@ -85,7 +86,8 @@ Geef ALLEEN een JSON object terug, geen uitleg of markdown. Formaat:
   "btw_bedrag": 0.00,
   "categorie": "...",
   "rekening_cijfers": "7361",
-  "opmerking": ""
+  "opmerking": "",
+  "tijd": "14:05"
 }`;
 
   // PDF gaat als 'document'-block, afbeeldingen blijven 'image'-block
