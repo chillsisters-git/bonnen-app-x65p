@@ -132,11 +132,13 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
     <input type="file" id="file-input" accept="image/*,application/pdf" style="display:none" onchange="handleFile(this)">
     <button class="btn-green" onclick="document.getElementById('camera-input').click()">📷 Foto maken van bon</button>
     <button class="btn-sec" onclick="document.getElementById('file-input').click()">↑ Bestand uploaden</button>
+    <button class="btn-sec" id="btn-scherm" onclick="maakSchermafbeelding()">🖥 Bon van je scherm knippen (ander tabblad of venster)</button>
     <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
       <p>Of sleep een bon hierheen</p>
       <small>JPG, PNG of PDF</small>
     </div>
     <div class="tip">💡 <span>AI leest datum, bedrag, BTW en betaalrekening automatisch uit</span></div>
+    <div class="tip" style="background:#f5f5f7">📸 <span><b>Bon op je scherm?</b> Druk <b>Cmd + Ctrl + Shift + 4</b>, sleep een kader om de bon, en druk hier op <b>Cmd + V</b>. Plakken werkt ook vanuit het overzicht.</span></div>
   </div>
 
   <div id="screen-controleer">
@@ -2879,6 +2881,110 @@ function bewaarBonnen(){
   }).catch(function(e){console.error('Opslaan mislukt',e);});
   return bonnenOpslagRij;
 }
+
+// Plakken van een schermafbeelding (of gekopieerde afbeelding/PDF) = nieuwe bon.
+// Op de Mac: Cmd+Ctrl+Shift+4 zet een schermafbeelding op het klembord; Cmd+V in de app.
+document.addEventListener('paste',function(e){
+  var el=document.activeElement;
+  var tag=el&&el.tagName?el.tagName.toLowerCase():'';
+  if(tag==='input'||tag==='textarea'||(el&&el.isContentEditable)) return; // gewoon tekst plakken in een veld
+  if(document.getElementById('screen-controleer').style.display==='block') return; // al een bon open
+  var items=(e.clipboardData&&e.clipboardData.items)||[];
+  for(var i=0;i<items.length;i++){
+    var it=items[i];
+    if(it.kind==='file'&&(it.type.indexOf('image/')===0||it.type==='application/pdf')){
+      var f=it.getAsFile();
+      if(!f) continue;
+      e.preventDefault();
+      var dt=new DataTransfer();dt.items.add(f);
+      var inp=document.getElementById('file-input');
+      inp.files=dt.files;
+      handleFile(inp);
+      return;
+    }
+  }
+});
+
+// ============ BON VAN JE SCHERM KNIPPEN ============
+// Kies een ander tabblad of venster (bijv. je mail met de factuur), de app maakt er één
+// foto van, en jij trekt een kader om de bon. Werkt in Chrome/Edge op de computer.
+function maakSchermafbeelding(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getDisplayMedia){
+    alert('Dit werkt alleen in Chrome of Edge op de computer. Gebruik anders Cmd + Ctrl + Shift + 4 en plak met Cmd + V.');
+    return;
+  }
+  navigator.mediaDevices.getDisplayMedia({video:true,audio:false,selfBrowserSurface:'exclude',preferCurrentTab:false})
+  .then(function(stream){
+    var video=document.createElement('video');
+    video.srcObject=stream;video.muted=true;video.playsInline=true;
+    return video.play().then(function(){
+      return new Promise(function(res){setTimeout(res,400);}); // even wachten tot het beeld scherp is
+    }).then(function(){
+      var c=document.createElement('canvas');
+      c.width=video.videoWidth;c.height=video.videoHeight;
+      c.getContext('2d').drawImage(video,0,0);
+      stream.getTracks().forEach(function(t){t.stop();});
+      toonUitsnijden(c);
+    });
+  }).catch(function(e){
+    if(e&&e.name==='NotAllowedError') return; // gewoon geannuleerd
+    alert('Schermafbeelding maken lukte niet ('+(e&&e.message||e)+'). Op de Mac moet Chrome soms toestemming krijgen via Systeeminstellingen → Privacy en beveiliging → Schermopname.');
+  });
+}
+function toonUitsnijden(canvas){
+  var oud=document.getElementById('knip-overlay');if(oud) oud.remove();
+  var ov=document.createElement('div');
+  ov.id='knip-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;gap:10px';
+  ov.innerHTML='<div style="color:#fff;font-size:14px;text-align:center">Trek een kader om de bon</div>'+
+    '<div id="knip-vak" style="position:relative;line-height:0;user-select:none;touch-action:none;cursor:crosshair">'+
+      '<img id="knip-img" draggable="false" style="max-width:94vw;max-height:76vh;display:block">'+
+      '<div id="knip-kader" style="position:absolute;border:2px solid #1D9E75;background:rgba(29,158,117,.15);display:none;pointer-events:none"></div>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">'+
+      '<button class="btn-green" style="width:auto;margin:0;padding:10px 16px" id="knip-ok" disabled>✓ Gebruik selectie</button>'+
+      '<button class="btn-sec" style="width:auto;margin:0;padding:10px 16px" id="knip-alles">Hele afbeelding</button>'+
+      '<button class="btn-sec" style="width:auto;margin:0;padding:10px 16px" id="knip-weg">Annuleren</button>'+
+    '</div>';
+  document.body.appendChild(ov);
+  var img=document.getElementById('knip-img');
+  img.src=canvas.toDataURL('image/png');
+  var vak=document.getElementById('knip-vak'),kader=document.getElementById('knip-kader'),okBtn=document.getElementById('knip-ok');
+  var start=null,sel=null;
+  function pos(e){var r=img.getBoundingClientRect();return {x:Math.max(0,Math.min(r.width,e.clientX-r.left)),y:Math.max(0,Math.min(r.height,e.clientY-r.top))};}
+  vak.addEventListener('pointerdown',function(e){start=pos(e);sel=null;vak.setPointerCapture(e.pointerId);kader.style.display='none';okBtn.disabled=true;});
+  vak.addEventListener('pointermove',function(e){
+    if(!start) return;
+    var p=pos(e);
+    sel={x:Math.min(start.x,p.x),y:Math.min(start.y,p.y),w:Math.abs(p.x-start.x),h:Math.abs(p.y-start.y)};
+    kader.style.cssText+=';display:block;left:'+sel.x+'px;top:'+sel.y+'px;width:'+sel.w+'px;height:'+sel.h+'px';
+  });
+  vak.addEventListener('pointerup',function(){start=null;okBtn.disabled=!(sel&&sel.w>10&&sel.h>10);});
+  function gebruik(c){
+    c.toBlob(function(blob){
+      ov.remove();
+      var f=new File([blob],'schermafbeelding.png',{type:'image/png'});
+      var dt=new DataTransfer();dt.items.add(f);
+      var inp=document.getElementById('file-input');inp.files=dt.files;handleFile(inp);
+    },'image/png');
+  }
+  okBtn.onclick=function(){
+    if(!sel) return;
+    var schaal=canvas.width/img.clientWidth;
+    var c=document.createElement('canvas');
+    c.width=Math.round(sel.w*schaal);c.height=Math.round(sel.h*schaal);
+    c.getContext('2d').drawImage(canvas,sel.x*schaal,sel.y*schaal,sel.w*schaal,sel.h*schaal,0,0,c.width,c.height);
+    gebruik(c);
+  };
+  document.getElementById('knip-alles').onclick=function(){gebruik(canvas);};
+  document.getElementById('knip-weg').onclick=function(){ov.remove();};
+}
+// Knop alleen tonen waar het kan (niet op telefoons).
+(function(){
+  var b=document.getElementById('btn-scherm');
+  if(b&&!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia)) b.style.display='none';
+})();
+// ============ EINDE BON VAN JE SCHERM ============
 
 var dz=document.getElementById('drop-zone');
 dz.addEventListener('dragover',function(e){e.preventDefault();dz.style.borderColor='#111111';});
