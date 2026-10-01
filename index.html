@@ -547,7 +547,7 @@ function setScreen(s){
   if(s==='overzicht') renderOverzicht();
 }
 
-function goBack(){editId=null;setScreen('overzicht');}
+function goBack(){editId=null;setScreen('overzicht');if(terugNaarVast){terugNaarVast=false;renderVasteAdressen();}}
 
 function setTab(t){
   activeTab=t;
@@ -2045,6 +2045,7 @@ function vastKoppelVoorstel(txs,bons){
     vrijeTx.slice().forEach(function(t){
       var i=vrijeBon.findIndex(function(b){
         var v=dagVerschil(b.datum,t.datum);
+        if((genegeerd[t.id]||[]).indexOf(b.id)>=0) return false; // eerder bewust losgemaakt
         return v!==null&&v===dagen&&Math.abs(b.bedrag-t.bedrag)<=0.01&&(dagen===0||parseDatumNL(t.datum)>=parseDatumNL(b.datum));
       });
       if(i<0) return;
@@ -2075,31 +2076,56 @@ function renderVasteAdressen(){
   var bons=bonsAll.filter(function(b){return maandSleutel(b.datum)===vastMaand;});
   var vrijeBons=bons.filter(function(b){return b.betaald!=='Contant'&&!b.handmatigGematcht;});
   var afgehandeldeBons=bons.filter(function(b){return b.betaald==='Contant'||b.handmatigGematcht;});
-  var v=vastKoppelVoorstel(txs.filter(function(t){return !handmatigTxGematcht[t.id];}),vrijeBons);
+  // Bestaande koppelingen blijven staan als ze kloppen (zelfde dag of 1 dag later), of als je
+  // ze zelf zo gekoppeld hebt en er geen betere bon/afschrijving op dezelfde dag vrij is.
+  var openTxs=txs.filter(function(t){return !handmatigTxGematcht[t.id];});
+  var bonIn=idSet(vrijeBons);
+  var behouden=[],gebruikt={tx:{},bon:{}};
+  var bestaand=openTxs.filter(function(t){return matchesByTxId[t.id]&&bonIn[matchesByTxId[t.id]];}).map(function(t){
+    return {tx:t,bon:vrijeBons.find(function(b){return b.id===matchesByTxId[t.id];})};
+  });
+  bestaand.forEach(function(p){
+    var d=dagVerschil(p.bon.datum,p.tx.datum);
+    if(d!==null&&d<=1){behouden.push(p);gebruikt.tx[p.tx.id]=gebruikt.bon[p.bon.id]=true;}
+  });
+  bestaand.forEach(function(p){
+    if(gebruikt.tx[p.tx.id]) return;
+    if(handmatigeKoppelingen[p.tx.id]!==p.bon.id) return; // automatisch met te veel dagen ertussen: opnieuw voorstellen
+    var beter=vrijeBons.some(function(b){return !gebruikt.bon[b.id]&&b.id!==p.bon.id&&dagVerschil(b.datum,p.tx.datum)===0&&Math.abs(b.bedrag-p.tx.bedrag)<=0.01;})||
+              openTxs.some(function(t){return !gebruikt.tx[t.id]&&t.id!==p.tx.id&&dagVerschil(t.datum,p.bon.datum)===0&&Math.abs(t.bedrag-p.bon.bedrag)<=0.01;});
+    if(!beter){behouden.push(p);gebruikt.tx[p.tx.id]=gebruikt.bon[p.bon.id]=true;}
+  });
+  var v=vastKoppelVoorstel(openTxs.filter(function(t){return !gebruikt.tx[t.id];}),vrijeBons.filter(function(b){return !gebruikt.bon[b.id];}));
+  v.paren=behouden.concat(v.paren);
   var nieuw=v.paren.filter(function(p){return matchesByTxId[p.tx.id]!==p.bon.id;});
   var rijen=[];
   v.paren.forEach(function(p){rijen.push({d:p.tx.datum,html:
     '<td>'+esc(p.tx.datum.slice(0,5))+'</td><td style="text-align:right">'+fmt(p.tx.bedrag)+'</td><td style="text-align:center">↔</td>'+
     '<td>bon '+esc(p.bon.datum.slice(0,5))+(p.bon.tijd?' '+esc(p.bon.tijd):'')+'</td>'+
-    '<td>'+(matchesByTxId[p.tx.id]===p.bon.id?'<span style="color:#0f6e56">✓</span>':'<span style="color:#854f0b" title="Wordt gekoppeld bij goedkeuren">nieuw</span>')+'</td>'});});
+    '<td style="white-space:nowrap">'+(matchesByTxId[p.tx.id]===p.bon.id?
+      '<span style="color:#0f6e56">✓</span> <a href="#" title="Losmaken" style="color:#c0392b;text-decoration:none" onclick="vastLos(\''+p.tx.id+'\','+p.bon.id+');return false">✕</a>':
+      '<button class="btw-pct-btn" style="flex:none;width:auto;padding:2px 7px;font-size:11px;color:#854f0b;border-color:#f0d9a8" title="Alleen deze koppelen" onclick="vastKoppel(\''+p.tx.id+'\','+p.bon.id+')">koppel</button>')+'</td>'});});
   txs.filter(function(t){return handmatigTxGematcht[t.id];}).forEach(function(t){rijen.push({d:t.datum,html:
-    '<td>'+esc(t.datum.slice(0,5))+'</td><td style="text-align:right">'+fmt(t.bedrag)+'</td><td></td><td style="color:#888">zonder bon afgehandeld</td><td><span style="color:#0f6e56">✓</span></td>'});});
+    '<td>'+esc(t.datum.slice(0,5))+'</td><td style="text-align:right">'+fmt(t.bedrag)+'</td><td></td><td style="color:#888">zonder bon afgehandeld</td>'+
+    '<td style="white-space:nowrap"><span style="color:#0f6e56">✓</span> <a href="#" title="Ongedaan maken" style="color:#c0392b;text-decoration:none" onclick="delete handmatigTxGematcht[\''+t.id+'\'];bewaarTransacties();renderVasteAdressen();return false">↩</a></td>'});});
   v.txZonder.forEach(function(t){rijen.push({d:t.datum,html:
     '<td>'+esc(t.datum.slice(0,5))+'</td><td style="text-align:right">'+fmt(t.bedrag)+'</td><td style="text-align:center">↔</td>'+
-    '<td style="color:#c0392b">bon mist</td><td>⚠</td>'});});
+    '<td><span style="color:#c0392b">bon mist</span>'+vastActiesTx(t,v.bonZonder)+'</td><td>⚠</td>'});});
   v.bonZonder.forEach(function(b){rijen.push({d:b.datum,html:
     '<td>—</td><td></td><td style="text-align:center">↔</td>'+
     '<td>bon '+esc(b.datum.slice(0,5))+' '+fmt(b.bedrag)+'<div style="display:flex;gap:4px;margin-top:3px">'+
       '<button class="btw-pct-btn" style="flex:none;width:auto;padding:2px 6px;font-size:11px" onclick="vastBonAfhandelen('+b.id+',\'contant\')">💶 Contant</button>'+
       '<button class="btw-pct-btn" style="flex:none;width:auto;padding:2px 6px;font-size:11px" onclick="vastBonAfhandelen('+b.id+',\'ok\')">✅ Klopt zo</button>'+
-    '</div></td><td>⚠</td>'});});
+    '</div>'+vastKiesLijst(v.txZonder,b.datum,function(t){return 'vastKoppel(\''+t.id+'\','+b.id+')';},function(t){return 'afschrijving '+t.datum.slice(0,5)+' · '+fmt(t.bedrag);})+'</td><td>⚠</td>'});});
   afgehandeldeBons.forEach(function(b){rijen.push({d:b.datum,html:
-    '<td>—</td><td></td><td></td><td style="color:#888">bon '+esc(b.datum.slice(0,5))+' '+fmt(b.bedrag)+' · '+(b.betaald==='Contant'?'contant':'afgehandeld')+'</td><td><span style="color:#0f6e56">✓</span></td>'});});
+    '<td>—</td><td></td><td></td><td style="color:#888">bon '+esc(b.datum.slice(0,5))+' '+fmt(b.bedrag)+' · '+(b.betaald==='Contant'?'contant':'afgehandeld')+'</td>'+
+    '<td style="white-space:nowrap"><span style="color:#0f6e56">✓</span> <a href="#" title="Ongedaan maken" style="color:#c0392b;text-decoration:none" onclick="vastBonTerug('+b.id+');return false">↩</a></td>'});});
   rijen.sort(function(a,b){return (parseDatumNL(a.d)||0)-(parseDatumNL(b.d)||0);});
   var ov=document.createElement('div');
   ov.id='vast-overlay';
   ov.className='confirm-overlay show';
-  ov.innerHTML='<div class="confirm-box" style="max-width:440px;text-align:left;max-height:92vh;overflow-y:auto">'+
+  ov.innerHTML='<style>#vast-overlay td:nth-child(1),#vast-overlay td:nth-child(2){white-space:nowrap}</style>'+
+    '<div class="confirm-box" style="max-width:440px;text-align:left;max-height:92vh;overflow-y:auto">'+
     '<h3 style="text-align:center">☕ Vaste adresjes per maand</h3>'+
     '<select style="margin:6px 0" onchange="vastGroep=this.value;vastMaand=null;renderVasteAdressen()">'+keys.map(function(k){
       return '<option value="'+esc(k)+'"'+(k===vastGroep?' selected':'')+'>'+esc(vastLabel(k))+' ('+vast[k]+'x)</option>';}).join('')+'</select>'+
@@ -2120,6 +2146,57 @@ function renderVasteAdressen(){
   vastHuidig=v;
 }
 var vastHuidig=null;
+// Keuzelijstje "koppel aan…": kandidaten gesorteerd op datum dichtbij.
+function vastKiesLijst(kandidaten,datum,klik,tekst){
+  if(!kandidaten.length) return '';
+  var lijst=kandidaten.slice().sort(function(a,b){return (dagVerschil(a.datum,datum)||99)-(dagVerschil(b.datum,datum)||99);}).slice(0,8);
+  var id='vk'+Math.random().toString(36).slice(2,8);
+  return '<select id="'+id+'" style="margin-top:4px;font-size:11px;padding:3px 4px" onchange="if(this.value){var f=new Function(this.value);f();}">'+
+    '<option value="">koppel aan…</option>'+lijst.map(function(x){return '<option value="'+esc(klik(x))+'">'+esc(tekst(x))+'</option>';}).join('')+'</select>';
+}
+function vastActiesTx(t,bonZonder){
+  return '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">'+
+    '<button class="btw-pct-btn" style="flex:none;width:auto;padding:2px 6px;font-size:11px" title="Bon (foto/PDF) toevoegen" onclick="vastBonUploaden()">📷 Bon</button>'+
+    '<button class="btw-pct-btn" style="flex:none;width:auto;padding:2px 6px;font-size:11px" title="Bon maken vanuit deze afschrijving" onclick="vastBonMaken(\''+t.id+'\')">➕ Maak bon</button>'+
+    '<button class="btw-pct-btn" style="flex:none;width:auto;padding:2px 6px;font-size:11px" title="Afhandelen zonder bon" onclick="vastTxZonderBon(\''+t.id+'\')">✅ Zonder bon</button>'+
+  '</div>'+vastKiesLijst(bonZonder,t.datum,function(b){return 'vastKoppel(\''+t.id+'\','+b.id+')';},function(b){return 'bon '+b.datum.slice(0,5)+(b.tijd?' '+b.tijd:'')+' · '+fmt(b.bedrag);});
+}
+function vastKoppel(txId,bonId){
+  Object.keys(handmatigeKoppelingen).forEach(function(k){if(handmatigeKoppelingen[k]===bonId&&k!==txId) delete handmatigeKoppelingen[k];});
+  if(genegeerd[txId]) genegeerd[txId]=genegeerd[txId].filter(function(id){return id!==bonId;});
+  handmatigeKoppelingen[txId]=bonId;
+  matchTransacties();bewaarTransacties();renderVasteAdressen();
+}
+function vastLos(txId,bonId){
+  if(handmatigeKoppelingen[txId]===bonId) delete handmatigeKoppelingen[txId];
+  if(!genegeerd[txId]) genegeerd[txId]=[];
+  if(genegeerd[txId].indexOf(bonId)<0) genegeerd[txId].push(bonId);
+  matchTransacties();bewaarTransacties();renderVasteAdressen();
+}
+function vastTxZonderBon(txId){
+  handmatigTxGematcht[txId]=true;
+  bewaarTransacties();renderVasteAdressen();
+}
+function vastBonTerug(bonId){
+  var b=bonnen.find(function(x){return x.id===bonId;});
+  if(!b) return;
+  if(b.betaald==='Contant') b.betaald='BUNQ Zakelijk (7361)';
+  delete b.handmatigGematcht;
+  bewaarBonnen();matchTransacties();renderVasteAdressen();
+}
+function vastBonUploaden(){
+  var ov=document.getElementById('vast-overlay');if(ov) ov.remove();
+  terugNaarVast=true;
+  document.getElementById('file-input').click();
+}
+function vastBonMaken(txId){
+  var ov=document.getElementById('vast-overlay');if(ov) ov.remove();
+  terugNaarVast=true;
+  maakBonVanTransactie(txId);
+}
+// Na opslaan van een bon die je vanuit dit overzicht toevoegde: overzicht weer openen.
+var terugNaarVast=false;
+
 function vastKeurGoed(){
   if(!vastHuidig) return;
   vastHuidig.paren.forEach(function(p){
@@ -2897,6 +2974,7 @@ function saveBon(){
   bewaarFoto(bon.id,previewSrc);
   matchTransacties();
   setScreen('overzicht');
+  if(terugNaarVast){terugNaarVast=false;renderVasteAdressen();}
 }
 
 function saveBonSheets(){
