@@ -1566,6 +1566,7 @@ function verwijderAfschrift(id){
   if(!g) return;
   var ids=g.txs.map(function(t){return t.id;});
   transacties=transacties.filter(function(t){return ids.indexOf(t.id)<0;});
+  ids.forEach(function(id){verwijderdeTxIds[id]=true;});
   ids.forEach(function(txId){delete handmatigeKoppelingen[txId];delete genegeerd[txId];delete handmatigTxGematcht[txId];delete geselecteerdeTransacties[txId];});
   if(afsOpenId===id) afsOpenId=null;
   bewaarTransacties();
@@ -2268,6 +2269,7 @@ function bevestigVerwijder(){
   if(pendingDelete.type==='tx'){
     var txId=pendingDelete.id;
     transacties=transacties.filter(function(t){return t.id!==txId;});
+    verwijderdeTxIds[txId]=true;
     delete handmatigeKoppelingen[txId];
     delete genegeerd[txId];
     delete handmatigTxGematcht[txId];
@@ -2289,6 +2291,7 @@ function bevestigVerwijder(){
   if(pendingDelete.type==='bonnen-bulk'){
     var bonIds=Object.keys(geselecteerdeBonnen).map(function(s){return parseInt(s,10);});
     bonnen=bonnen.filter(function(b){return bonIds.indexOf(b.id)<0;});
+    bonIds.forEach(function(id){verwijderdeBonIds[id]=true;});
     geselecteerdeBonnen={};
     pendingDelete=null;
     bewaarBonnen();
@@ -2300,6 +2303,7 @@ function bevestigVerwijder(){
   if(pendingDelete.type==='transacties-bulk'){
     var txIds=Object.keys(geselecteerdeTransacties);
     transacties=transacties.filter(function(t){return txIds.indexOf(t.id)<0;});
+    txIds.forEach(function(id){verwijderdeTxIds[id]=true;});
     txIds.forEach(function(id){delete handmatigeKoppelingen[id];delete genegeerd[id];delete handmatigTxGematcht[id];});
     geselecteerdeTransacties={};
     pendingDelete=null;
@@ -2312,6 +2316,7 @@ function bevestigVerwijder(){
   }
   var bonId=pendingDelete.id;
   bonnen=bonnen.filter(function(b){return b.id!==bonId;});
+  verwijderdeBonIds[bonId]=true;
   pendingDelete=null;
   bewaarBonnen();
   document.getElementById('confirm-overlay').classList.remove('show');
@@ -2722,6 +2727,7 @@ function exportCSV(){
 function laadTransacties(){
   fetch('/api/transacties').then(function(res){return res.json();}).then(function(data){
     transacties=data.transacties||[];
+    bekendeServerTxIds=idSet(transacties);
     handmatigeKoppelingen=data.handmatig||{};
     genegeerd=data.genegeerd||{};
     handmatigTxGematcht=data.txGematcht||{};
@@ -2731,17 +2737,69 @@ function laadTransacties(){
 }
 
 function bewaarTransacties(){
-  fetch('/api/transacties',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({transacties:transacties,handmatig:handmatigeKoppelingen,genegeerd:genegeerd,txGematcht:handmatigTxGematcht})
+  txOpslagRij=txOpslagRij.then(function(){
+    return fetch('/api/transacties').then(function(r){return r.json();}).catch(function(){return {};});
+  }).then(function(data){
+    var server=(data&&data.transacties)||[];
+    var opServer=idSet(server);
+    var lokaal=idSet(transacties);
+    var nieuw=server.filter(function(t){return !lokaal[t.id]&&!verwijderdeTxIds[t.id];});
+    var elders=transacties.filter(function(t){return bekendeServerTxIds[t.id]&&!opServer[t.id];});
+    if(elders.length){
+      transacties=transacties.filter(function(t){return !(bekendeServerTxIds[t.id]&&!opServer[t.id]);});
+      matchTransacties();
+    }
+    if(nieuw.length){
+      transacties=transacties.concat(nieuw);
+      // Koppelingen die op het andere apparaat bij die nieuwe transacties zijn gemaakt, meenemen.
+      nieuw.forEach(function(t){
+        if(data.handmatig&&data.handmatig[t.id]!==undefined&&handmatigeKoppelingen[t.id]===undefined) handmatigeKoppelingen[t.id]=data.handmatig[t.id];
+        if(data.genegeerd&&data.genegeerd[t.id]&&!genegeerd[t.id]) genegeerd[t.id]=data.genegeerd[t.id];
+        if(data.txGematcht&&data.txGematcht[t.id]) handmatigTxGematcht[t.id]=true;
+      });
+      matchTransacties();
+    }
+    return fetch('/api/transacties',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({transacties:transacties,handmatig:handmatigeKoppelingen,genegeerd:genegeerd,txGematcht:handmatigTxGematcht})
+    }).then(function(r){bekendeServerTxIds=idSet(transacties);return r;});
   }).catch(function(e){console.error('Transacties opslaan mislukt',e);});
+  return txOpslagRij;
 }
+
+// Kom je terug naar dit tabblad (bijv. na een foto met je telefoon), dan halen we
+// de nieuwste bonnen en transacties op — behalve als je net een bon aan het invullen bent.
+var laatsteVerversing=0;
+function verversData(){
+  if(Date.now()-laatsteVerversing<5000) return;
+  if(document.getElementById('screen-controleer').style.display==='block') return;
+  laatsteVerversing=Date.now();
+  Promise.all([
+    bonnenOpslagRij.then(function(){return fetch('/api/bonnen').then(function(r){return r.json();});}),
+    txOpslagRij.then(function(){return fetch('/api/transacties').then(function(r){return r.json();});})
+  ]).then(function(res){
+    if(res[0]&&Array.isArray(res[0].bonnen)){bonnen=res[0].bonnen;bekendeServerBonIds=idSet(bonnen);}
+    var d=res[1]||{};
+    if(Array.isArray(d.transacties)){
+      transacties=d.transacties;
+      bekendeServerTxIds=idSet(transacties);
+      handmatigeKoppelingen=d.handmatig||{};
+      genegeerd=d.genegeerd||{};
+      handmatigTxGematcht=d.txGematcht||{};
+    }
+    matchTransacties();
+    if(document.getElementById('screen-overzicht').style.display==='block') renderOverzicht();
+  }).catch(function(){});
+}
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible') verversData();});
+window.addEventListener('focus',verversData);
 
 // --- Permanente opslag (Upstash, via /api/bonnen) ---
 function laadBonnen(){
   fetch('/api/bonnen').then(function(res){return res.json();}).then(function(data){
     bonnen=data.bonnen||[];
+    bekendeServerBonIds=idSet(bonnen);
     matchTransacties();
     setScreen('overzicht');
   }).catch(function(){
@@ -2749,12 +2807,40 @@ function laadBonnen(){
   });
 }
 
+// Opslaan zonder elkaars werk te overschrijven: vlak vóór het opslaan halen we de
+// nieuwste lijst van de server op, en voegen bonnen toe die intussen op een ander
+// apparaat (bijv. je telefoon) zijn gemaakt. Wat je hier verwijderd hebt, blijft weg.
+var verwijderdeBonIds={};
+var verwijderdeTxIds={};
+// Welke ids stonden er op de server bij de laatste keer laden/opslaan? Staat een id die
+// we toen kenden er nu niet meer, dan is hij op een ander apparaat verwijderd → hier ook weg.
+var bekendeServerBonIds={};
+var bekendeServerTxIds={};
+function idSet(lijst){var o={};lijst.forEach(function(x){o[x.id]=true;});return o;}
+var bonnenOpslagRij=Promise.resolve();
+var txOpslagRij=Promise.resolve();
 function bewaarBonnen(){
-  fetch('/api/bonnen',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({bonnen:bonnen})
+  bonnenOpslagRij=bonnenOpslagRij.then(function(){
+    return fetch('/api/bonnen').then(function(r){return r.json();}).catch(function(){return {};});
+  }).then(function(data){
+    var server=(data&&data.bonnen)||[];
+    var opServer=idSet(server);
+    var lokaal=idSet(bonnen);
+    var nieuw=server.filter(function(b){return !lokaal[b.id]&&!verwijderdeBonIds[b.id];});
+    var elders=bonnen.filter(function(b){return bekendeServerBonIds[b.id]&&!opServer[b.id];});
+    if(elders.length) bonnen=bonnen.filter(function(b){return !(bekendeServerBonIds[b.id]&&!opServer[b.id]);});
+    if(nieuw.length||elders.length){
+      bonnen=nieuw.concat(bonnen);
+      matchTransacties();
+      if(document.getElementById('screen-overzicht').style.display==='block') renderOverzicht();
+    }
+    return fetch('/api/bonnen',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({bonnen:bonnen})
+    }).then(function(r){bekendeServerBonIds=idSet(bonnen);return r;});
   }).catch(function(e){console.error('Opslaan mislukt',e);});
+  return bonnenOpslagRij;
 }
 
 var dz=document.getElementById('drop-zone');
