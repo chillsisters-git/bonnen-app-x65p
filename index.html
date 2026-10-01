@@ -2059,6 +2059,19 @@ function printLijstOntbrekend(){
 // ============ VASTE ADRESJES PER MAAND ============
 // Voor plekken waar hij vaak komt met kleine, steeds gelijke bedragen (dagelijkse koffie).
 // Per winkel en per maand zet de app afschrijvingen en bonnen op datum naast elkaar.
+// Alle winkels/partijen met minstens 3 afschrijvingen — voor het overzicht per maand.
+function terugkerendeAdressen(){
+  var tel={};
+  transacties.forEach(function(t){
+    if(t.type!=='af') return;
+    var k=naamSleutel(t.omschrijving);
+    if(k) tel[k]=(tel[k]||0)+1;
+  });
+  var uit={};
+  Object.keys(tel).forEach(function(k){if(tel[k]>=3) uit[k]=tel[k];});
+  return uit;
+}
+// Strengere definitie (vaak, kleine gelijke bedragen) — gebruikt bij het automatisch koppelen.
 function vasteAdressen(){
   var groepen={};
   transacties.forEach(function(t){
@@ -2095,7 +2108,7 @@ function bonnenVanAdres(txKey){
 var vastGroep=null,vastMaand=null;
 function maandSleutel(d){var p=(d||'').split('-');return p.length===3?p[1]+'-'+p[2]:'';}
 function toonVasteAdressen(){
-  var vast=vasteAdressen();
+  var vast=terugkerendeAdressen();
   var keys=Object.keys(vast).sort(function(a,b){return vast[b]-vast[a];});
   if(!keys.length) return;
   if(!vastGroep||!vast[vastGroep]) vastGroep=keys[0];
@@ -2128,7 +2141,7 @@ function renderVasteAdressen(){
   var oud=document.getElementById('vast-overlay');
   var scroll=oud?oud.querySelector('.confirm-box').scrollTop:0;
   if(oud) oud.remove();
-  var vast=vasteAdressen();
+  var vast=terugkerendeAdressen();
   var keys=Object.keys(vast).sort(function(a,b){return vast[b]-vast[a];});
   var txsAll=transacties.filter(function(t){return t.type==='af'&&naamSleutel(t.omschrijving)===vastGroep;});
   var bonsAll=bonnenVanAdres(vastGroep);
@@ -2175,7 +2188,7 @@ function renderVasteAdressen(){
       '<button class="btw-pct-btn" style="flex:none;width:auto;padding:2px 7px;font-size:11px;color:#854f0b;border-color:#f0d9a8" title="Alleen deze koppelen" onclick="vastKoppel(\''+p.tx.id+'\','+p.bon.id+')">koppel</button>')+'</td>'});});
   txs.filter(function(t){return handmatigTxGematcht[t.id];}).forEach(function(t){rijen.push({d:t.datum,html:
     '<td>'+esc(t.datum.slice(0,5))+'</td><td style="text-align:right">'+fmt(t.bedrag)+'</td><td></td><td style="color:#888">zonder bon afgehandeld</td>'+
-    '<td style="white-space:nowrap"><span style="color:#0f6e56">✓</span> <a href="#" title="Ongedaan maken" style="color:#c0392b;text-decoration:none" onclick="delete handmatigTxGematcht[\''+t.id+'\'];bewaarTransacties();renderVasteAdressen();return false">↩</a></td>'});});
+    '<td style="white-space:nowrap"><button class="btw-pct-btn" style="flex:none;width:auto;padding:2px 7px;font-size:11px" title="Ongedaan maken" onclick="delete handmatigTxGematcht[\''+t.id+'\'];bewaarTransacties();renderVasteAdressen()">↩ terug</button></td>'});});
   v.txZonder.forEach(function(t){rijen.push({d:t.datum,html:
     '<td>'+esc(t.datum.slice(0,5))+'</td><td style="text-align:right">'+fmt(t.bedrag)+'</td><td style="text-align:center">↔</td>'+
     '<td><span style="color:#c0392b">bon mist</span>'+vastActiesTx(t,v.bonZonder)+'</td><td>⚠</td>'});});
@@ -2187,7 +2200,7 @@ function renderVasteAdressen(){
     '</div>'+vastKiesLijst(v.txZonder,b.datum,function(t){return 'vastKoppel(\''+t.id+'\','+b.id+')';},function(t){return 'afschrijving '+t.datum.slice(0,5)+' · '+fmt(t.bedrag);})+'</td><td>⚠</td>'});});
   afgehandeldeBons.forEach(function(b){rijen.push({d:b.datum,html:
     '<td>—</td><td></td><td></td><td style="color:#888">bon '+esc(b.datum.slice(0,5))+' '+fmt(b.bedrag)+' · '+(b.betaald==='Contant'?'contant':'afgehandeld')+'</td>'+
-    '<td style="white-space:nowrap"><span style="color:#0f6e56">✓</span> <a href="#" title="Ongedaan maken" style="color:#c0392b;text-decoration:none" onclick="vastBonTerug('+b.id+');return false">↩</a></td>'});});
+    '<td style="white-space:nowrap"><button class="btw-pct-btn" style="flex:none;width:auto;padding:2px 7px;font-size:11px" title="Ongedaan maken" onclick="vastBonTerug('+b.id+')">↩ terug</button></td>'});});
   rijen.sort(function(a,b){return (parseDatumNL(a.d)||0)-(parseDatumNL(b.d)||0);});
   var ov=document.createElement('div');
   ov.id='vast-overlay';
@@ -2355,7 +2368,7 @@ function renderBankTab(){
   }
 
   // Eerst de bonnen die nog gekoppeld moeten worden — die zijn het snelst af te handelen.
-  if(Object.keys(vasteAdressen()).length){
+  if(Object.keys(terugkerendeAdressen()).length){
     html+='<button class="btn-sec" onclick="toonVasteAdressen()">☕ Vaste adresjes per maand afvinken</button>';
   }
   html+='<div class="section-title">Zakelijke bonnen nog niet volledig gematcht ('+nietGematchteBonnen.length+')</div>';
@@ -3334,14 +3347,35 @@ function toonUitsnijden(canvas){
 // ============ FOTO GROOT BEKIJKEN ============
 // Tik op een bonfoto: schermvullend. Tik nog eens op de foto om in te zoomen (ware grootte,
 // dan kun je scrollen), nog eens om terug te gaan. PDF's openen in een nieuw tabblad.
-function toonGroot(src){
+function toonGroot(src,pdfUrl){
   if(!src) return;
   if(src.indexOf('data:application/pdf')===0){
-    try{
-      var bin=atob(src.split(',')[1]),u=new Uint8Array(bin.length);
-      for(var i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
-      window.open(URL.createObjectURL(new Blob([u],{type:'application/pdf'})),'_blank');
-    }catch(e){alert('PDF openen lukte niet.');}
+    // PDF: pagina's omzetten naar plaatjes (pdf.js) en net als een foto tonen.
+    var bin=atob(src.split(',')[1]),u=new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
+    var pdfUrl=URL.createObjectURL(new Blob([u],{type:'application/pdf'}));
+    laadPdfJs().then(function(pdfjsLib){
+      return pdfjsLib.getDocument({data:u}).promise;
+    }).then(function(pdf){
+      var n=Math.min(pdf.numPages,5),paginas=[];
+      for(var p=1;p<=n;p++) paginas.push(p);
+      return Promise.all(paginas.map(function(nr){
+        return pdf.getPage(nr).then(function(page){
+          var vp=page.getViewport({scale:2});
+          var c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;
+          var ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
+          return page.render({canvasContext:ctx,viewport:vp}).promise.then(function(){return c;});
+        });
+      }));
+    }).then(function(canvassen){
+      // Meerdere pagina's onder elkaar samenvoegen tot één plaatje.
+      var w=Math.max.apply(null,canvassen.map(function(c){return c.width;}));
+      var h=canvassen.reduce(function(s,c){return s+c.height+20;},0);
+      var all=document.createElement('canvas');all.width=w;all.height=h;
+      var ctx=all.getContext('2d');ctx.fillStyle='#ddd';ctx.fillRect(0,0,w,h);
+      var y=0;canvassen.forEach(function(c){ctx.drawImage(c,0,y);y+=c.height+20;});
+      toonGroot(all.toDataURL('image/png'),pdfUrl);
+    }).catch(function(){window.open(pdfUrl,'_blank');}); // lukt omzetten niet: dan gewoon als PDF openen
     return;
   }
   var oud=document.getElementById('groot-overlay');if(oud) oud.remove();
@@ -3350,6 +3384,7 @@ function toonGroot(src){
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:300;overflow:auto;display:flex;align-items:center;justify-content:center';
   ov.innerHTML='<img id="groot-img" src="'+src+'" style="max-width:96vw;max-height:92vh;object-fit:contain;cursor:zoom-in;background:#fff">'+
     '<button onclick="document.getElementById(\'groot-overlay\').remove()" style="position:fixed;top:12px;right:12px;background:#fff;border:none;border-radius:20px;padding:8px 14px;font-size:14px;cursor:pointer;z-index:301">✕ Sluiten</button>'+
+    (pdfUrl?'<a href="'+pdfUrl+'" target="_blank" style="position:fixed;top:12px;left:12px;background:#fff;border-radius:20px;padding:8px 14px;font-size:14px;color:#111;text-decoration:none;z-index:301">📄 Open als PDF</a>':'')+
     '<div style="position:fixed;bottom:14px;left:0;right:0;text-align:center;color:#ccc;font-size:12px;pointer-events:none">Tik op de foto om in te zoomen</div>';
   var img=ov.querySelector('#groot-img'),zoom=false;
   img.onclick=function(e){
