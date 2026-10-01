@@ -147,8 +147,8 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
       <div class="loader-txt">AI leest de bon uit...</div>
     </div>
     <div id="form-container" style="display:none">
-      <img id="preview-img" class="preview-img" style="display:none">
-      <div id="preview-pdf" class="preview-pdf" style="display:none"><span class="preview-pdf-icon">📄</span>PDF-bestand</div>
+      <img id="preview-img" class="preview-img" style="display:none;cursor:zoom-in" title="Tik om te vergroten" onclick="toonGroot(this.src)">
+      <div id="preview-pdf" class="preview-pdf" style="display:none;cursor:zoom-in" title="Tik om te openen" onclick="toonGroot(previewSrc)"><span class="preview-pdf-icon">📄</span>PDF-bestand — tik om te openen</div>
       <div class="err" id="form-err" style="display:none"></div>
       <div class="err" id="form-dubbel" style="display:none;background:#fef3e2;color:#854f0b"></div>
       <div class="ok" id="form-ok" style="display:none"></div>
@@ -608,6 +608,7 @@ function renderTab(){
         '<div style="display:flex;align-items:center;gap:8px;margin-left:8px">'+
           '<div style="text-align:right"><div class="bon-amt">'+fmt(b.bedrag)+'</div>'+(b.btw>0?'<div class="bon-btw">BTW '+fmt(b.btw)+'</div>':'')+'</div>'+
           '<div class="bon-actions">'+
+            (b.heeftFoto?'<button class="btn-edit" onclick="bekijkBonFoto('+b.id+')" title="Foto bekijken">📷</button>':'')+
             '<button class="btn-edit" onclick="bewerkBon('+b.id+')">✏️</button>'+
             '<button class="btn-del" onclick="vraagVerwijder('+b.id+')">🗑</button>'+
           '</div>'+
@@ -1863,7 +1864,7 @@ function renderAfschriftenTab(){
           else if(dubbelFotoCache[b.id]===undefined) foto='<div class="preview-pdf" style="padding:14px;margin:6px 0 0">Foto laden…</div>';
           else if(!dubbelFotoCache[b.id]) foto='<div class="preview-pdf" style="padding:14px;margin:6px 0 0">Foto niet gevonden</div>';
           else if(dubbelFotoCache[b.id].indexOf('data:application/pdf')===0) foto='<div class="preview-pdf" style="padding:14px;margin:6px 0 0">📄 PDF-bon</div>';
-          else foto='<img src="'+dubbelFotoCache[b.id]+'" style="width:100%;max-height:220px;object-fit:contain;border-radius:8px;background:#f5f5f7;margin-top:6px">';
+          else foto='<img onclick="toonGroot(this.src)" title="Tik om te vergroten" src="'+dubbelFotoCache[b.id]+'" style="cursor:zoom-in;width:100%;max-height:220px;object-fit:contain;border-radius:8px;background:#f5f5f7;margin-top:6px">';
         }
         html+='<div style="padding:8px 0;'+(i?'border-top:1px dashed #e5e5e5':'')+'">'+
           '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'+
@@ -2359,6 +2360,7 @@ function renderBankTab(){
           '<div class="bon-amt">'+fmt(b.bedrag)+'</div>'+
           '<div class="bon-actions">'+
             '<button class="btn-edit" onclick="markeerBonGematcht('+b.id+')" title="Handmatig als gematcht markeren (zonder specifieke transactie te koppelen)">✅</button>'+
+            (b.heeftFoto?'<button class="btn-edit" onclick="bekijkBonFoto('+b.id+')" title="Foto bekijken">📷</button>':'')+
             '<button class="btn-edit" onclick="bewerkBon('+b.id+')" title="Bon bewerken">✏️</button>'+
             '<button class="btn-del" onclick="vraagVerwijder('+b.id+')" title="Bon verwijderen">🗑</button>'+
           '</div>'+
@@ -3300,6 +3302,55 @@ function toonUitsnijden(canvas){
   if(b&&!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia)) b.style.display='none';
 })();
 // ============ EINDE BON VAN JE SCHERM ============
+
+// ============ FOTO GROOT BEKIJKEN ============
+// Tik op een bonfoto: schermvullend. Tik nog eens op de foto om in te zoomen (ware grootte,
+// dan kun je scrollen), nog eens om terug te gaan. PDF's openen in een nieuw tabblad.
+function toonGroot(src){
+  if(!src) return;
+  if(src.indexOf('data:application/pdf')===0){
+    try{
+      var bin=atob(src.split(',')[1]),u=new Uint8Array(bin.length);
+      for(var i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
+      window.open(URL.createObjectURL(new Blob([u],{type:'application/pdf'})),'_blank');
+    }catch(e){alert('PDF openen lukte niet.');}
+    return;
+  }
+  var oud=document.getElementById('groot-overlay');if(oud) oud.remove();
+  var ov=document.createElement('div');
+  ov.id='groot-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:300;overflow:auto;display:flex;align-items:center;justify-content:center';
+  ov.innerHTML='<img id="groot-img" src="'+src+'" style="max-width:96vw;max-height:92vh;object-fit:contain;cursor:zoom-in;background:#fff">'+
+    '<button onclick="document.getElementById(\'groot-overlay\').remove()" style="position:fixed;top:12px;right:12px;background:#fff;border:none;border-radius:20px;padding:8px 14px;font-size:14px;cursor:pointer;z-index:301">✕ Sluiten</button>'+
+    '<div style="position:fixed;bottom:14px;left:0;right:0;text-align:center;color:#ccc;font-size:12px;pointer-events:none">Tik op de foto om in te zoomen</div>';
+  var img=ov.querySelector('#groot-img'),zoom=false;
+  img.onclick=function(e){
+    e.stopPropagation();
+    zoom=!zoom;
+    if(zoom){
+      img.style.maxWidth='none';img.style.maxHeight='none';img.style.width=Math.max(img.naturalWidth,window.innerWidth*1.6)+'px';img.style.cursor='zoom-out';
+      ov.style.alignItems='flex-start';ov.style.justifyContent='flex-start';
+      // ongeveer naar het aangetikte punt scrollen
+      var rx=e.offsetX/img.clientWidth,ry=e.offsetY/img.clientHeight;
+      setTimeout(function(){ov.scrollLeft=img.clientWidth*rx-window.innerWidth/2;ov.scrollTop=img.clientHeight*ry-window.innerHeight/2;},0);
+    } else {
+      img.style.maxWidth='96vw';img.style.maxHeight='92vh';img.style.width='';img.style.cursor='zoom-in';
+      ov.style.alignItems='center';ov.style.justifyContent='center';
+    }
+  };
+  ov.onclick=function(e){if(e.target===ov) ov.remove();};
+  document.body.appendChild(ov);
+}
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){var o=document.getElementById('groot-overlay');if(o) o.remove();}
+});
+// Foto van een bon bekijken zonder hem te openen om te bewerken (📷-knopje in de lijst).
+function bekijkBonFoto(id){
+  fetch('/api/bonnen?type=foto&id='+id).then(function(r){return r.json();}).then(function(data){
+    if(data.foto) toonGroot(data.foto); else alert('Geen foto gevonden bij deze bon.');
+  }).catch(function(){alert('Foto ophalen lukte niet.');});
+}
+// ============ EINDE FOTO GROOT ============
 
 var dz=document.getElementById('drop-zone');
 dz.addEventListener('dragover',function(e){e.preventDefault();dz.style.borderColor='#111111';});
