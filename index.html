@@ -1619,9 +1619,45 @@ function lijktOpElkaar(a,b){
 function verschillendeTijd(a,b){
   return !!(a.tijd&&b.tijd&&a.tijd!==b.tijd);
 }
+// Het bankafschrift als scheidsrechter: staan er op die dag minstens zoveel betalingen
+// met dit bedrag als er bonnen zijn, dan zijn het gewoon zoveel aankopen — niet dubbel.
+function telBetalingen(datum,bedrag,betaald){
+  var r=BEKENDE_REKENINGEN.indexOf(betaald)>=0?betaald:null;
+  return transacties.filter(function(t){
+    if(t.type!=='af'||Math.abs(t.bedrag-bedrag)>0.01||dagVerschil(t.datum,datum)!==0) return false;
+    var tr=matchRekening(t.rekening);
+    return !r||!tr||tr===r;
+  }).length;
+}
+function telBonnen(datum,bedrag){
+  return bonnen.filter(function(b){return !b.herhalend&&Math.abs((b.bedrag||0)-bedrag)<=0.01&&dagVerschil(b.datum,datum)===0;}).length;
+}
+function afschriftBekendVoor(datum,betaald){
+  // Is er van deze rekening een afschrift ingelezen dat deze datum dekt?
+  var r=BEKENDE_REKENINGEN.indexOf(betaald)>=0?betaald:null;
+  var d=parseDatumNL(datum);
+  if(!r||!d) return false;
+  var datums=transacties.filter(function(t){return matchRekening(t.rekening)===r;}).map(function(t){return parseDatumNL(t.datum);}).filter(Boolean);
+  if(!datums.length) return false;
+  return d>=new Date(Math.min.apply(null,datums))&&d<=new Date(Math.max.apply(null,datums));
+}
+function bankZegtNietDubbel(a,b){
+  if(a.betaald==='Contant'||b.betaald==='Contant') return false; // contant: niets op de bank, dan telt de tijd
+  // Elk aan een eigen afschrijving gekoppeld? Dan twee aankopen.
+  var ta=matchesByBonId[a.id]||[],tb=matchesByBonId[b.id]||[];
+  if(ta.length&&tb.length&&!ta.some(function(x){return tb.indexOf(x)>=0;})) return true;
+  if(!afschriftBekendVoor(a.datum,a.betaald)||!afschriftBekendVoor(b.datum,b.betaald)) return false;
+  if(dagVerschil(a.datum,b.datum)===0){
+    return telBetalingen(a.datum,a.bedrag,a.betaald)>=telBonnen(a.datum,a.bedrag);
+  }
+  // Verschillende dagen: heeft elke dag zijn eigen betaling? Dan niet dubbel.
+  return telBetalingen(a.datum,a.bedrag,a.betaald)>=telBonnen(a.datum,a.bedrag)&&
+         telBetalingen(b.datum,b.bedrag,b.betaald)>=telBonnen(b.datum,b.bedrag);
+}
 function zijnMogelijkDubbel(a,b){
   if(a.id===b.id) return false;
   if(verschillendeTijd(a,b)) return false; // zelfde dag en bedrag, maar andere tijd = twee aankopen
+  if(bankZegtNietDubbel(a,b)) return false;
   if(Math.abs((a.bedrag||0)-(b.bedrag||0))>0.01) return false;
   if(!(a.bedrag>0)) return false;
   if(a.herhalend||b.herhalend) return false;
@@ -1700,6 +1736,9 @@ function zoekBestaandeBon(nieuw){
   return bonnen.filter(function(b){
     if(b.id===nieuw.id||b.herhalend) return false;
     if(verschillendeTijd(b,nieuw)) return false;
+    // Nog een betaling met dit bedrag op die dag zonder bon? Dan is dit gewoon de volgende aankoop.
+    if(nieuw.betaald!=='Contant'&&afschriftBekendVoor(nieuw.datum,nieuw.betaald)&&
+       telBetalingen(nieuw.datum,nieuw.bedrag,nieuw.betaald)>telBonnen(nieuw.datum,nieuw.bedrag)) return false;
     if(Math.abs((b.bedrag||0)-(nieuw.bedrag||0))>0.01) return false;
     var v=dagVerschil(b.datum,nieuw.datum);
     return v===0||(v===null&&lijktOpElkaar(b.omschrijving,nieuw.omschrijving));
@@ -2756,7 +2795,7 @@ function showForm(d,pct,err,aiOk){
   document.getElementById('form-dubbel').style.display='none';
   controleerBankDatum();
   if(!editId){
-    var bestaand=zoekBestaandeBon({id:-1,datum:d.datum,tijd:d.tijd||'',bedrag:parseAmt(d.bedrag),omschrijving:d.omschrijving,herhalend:!!d.herhalend});
+    var bestaand=zoekBestaandeBon({id:-1,datum:d.datum,tijd:d.tijd||'',bedrag:parseAmt(d.bedrag),omschrijving:d.omschrijving,betaald:d.betaald,herhalend:!!d.herhalend});
     if(bestaand.length){toonDubbelWaarschuwing(bestaand);dubbelBevestigd=true;}
   }
 }
