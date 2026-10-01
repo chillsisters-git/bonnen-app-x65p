@@ -832,6 +832,7 @@ function matchTransacties(){
   // die koppel je bewust elke keer opnieuw handmatig aan de nieuwste afschrijving.
   var beschikbareBonnen=bonnen.filter(function(b){return BEKENDE_REKENINGEN.indexOf(b.betaald)>=0&&!matchesByBonId[b.id]&&!b.herhalend;});
   var paren=onthoudenNamen();
+  var vast=vasteAdressen();
   var openTx=transacties.filter(function(tx){return tx.type==='af'&&!matchesByTxId[tx.id];});
 
   // Alle mogelijke paren (zelfde bedrag, zelfde bank, datum hooguit 3 dagen verschil).
@@ -848,7 +849,12 @@ function matchTransacties(){
         if(Math.abs(b.bedrag-tx.bedrag)>0.01) return;
         if(!bankKlopt(b,tx)) return; // de bank moet kloppen
         var v=dagVerschil(b.datum,tx.datum);
-        if(v===null||v>maxDagen) return;
+        // Vaste adresjes (dagelijkse koffie e.d.): alleen zelfde dag of 1 dag verschil,
+        // anders raakt de bon van 3/9 verstrikt met de afschrijving van 6/9.
+        var isVast=!!vast[naamSleutel(tx.omschrijving)];
+        var max=isVast?Math.min(maxDagen,1):maxDagen;
+        if(v===null||v>max) return;
+        if(isVast&&v>0&&parseDatumNL(tx.datum)<parseDatumNL(b.datum)) return; // afschrijving vóór de aankoop kan niet
         var onthouden=isOnthouden(paren,b,tx);
         if(alleenOnthouden&&!onthouden) return;
         var opNaam=onthouden||naamLijktOp(b.omschrijving,tx.omschrijving);
@@ -1095,6 +1101,24 @@ function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
     bonnen.find(function(b){return String(b.id)===String(ownId);});
   var paren=onthoudenNamen();
   var voorstellen={};
+  var bezet={}; // txId -> bonId waar hij nu aan hangt
+  if(eigen&&kind==='bon'){
+    // Ook afschrijvingen die al aan een ándere bon hangen tonen (zelfde bedrag, hooguit 1 dag
+    // verschil) — dan kun je hem met één tik naar de goede bon verhuizen.
+    transacties.forEach(function(t){
+      var huidige=matchesByTxId[t.id];
+      if(t.type!=='af'||!huidige||huidige===eigen.id) return;
+      if(Math.abs(t.bedrag-eigen.bedrag)>0.01||!bankKlopt(eigen,t)) return;
+      var v=dagVerschil(eigen.datum,t.datum);
+      if(v===null||v>1) return;
+      if(term){
+        var bs=(t.bedrag||0).toFixed(2);
+        if(((t.omschrijving||'')+' '+t.datum+' '+bs+' '+bs.replace('.',',')).toLowerCase().indexOf(term)<0) return;
+      }
+      bezet[t.id]=huidige;
+      treffers.push(t);
+    });
+  }
   if(eigen){
     treffers.forEach(function(item){
       var v=kind==='tx'?voorstelVoor(item,eigen,paren):voorstelVoor(eigen,item,paren);
@@ -1128,7 +1152,10 @@ function filterKoppelOpties(kind,ownId,zoektekst,behoudWeergave){
     var bank=item.betaald?item.betaald.replace(/\s*\(.*\)/,''):(item.rekening?(matchRekening(item.rekening)||'rek. …'+item.rekening).replace(/\s*\(.*\)/,''):'');
     var label=item.datum+' · '+(item.omschrijving||'—')+' · '+fmt(item.bedrag)+(bank?' · '+bank:'');
     var v=voorstellen[item.id];
-    if(v) label='<span style="color:#854f0b;font-weight:600">⭐ voorstel · '+v.reden+'</span><br>'+label;
+    if(bezet[item.id]){
+      var andere=bonnen.find(function(b){return b.id===bezet[item.id];});
+      label='<span style="color:#2f6fed;font-weight:600">🔁 hangt nu aan bon '+(andere?andere.datum.slice(0,5):'')+' — tik om hierheen te verhuizen</span><br>'+label;
+    } else if(v) label='<span style="color:#854f0b;font-weight:600">⭐ voorstel · '+v.reden+'</span><br>'+label;
     var onclickAttr=kind==='tx'?
       'koppelHandmatig(\''+ownId+'\','+item.id+')':
       'koppelHandmatig(\''+item.id+'\','+ownId+')';
@@ -1836,6 +1863,7 @@ function gekozenTxZonderBon(){
 var afgehandeldOpen=false; // blok 'Afgehandeld' op het tabblad Bankafschrift standaard ingeklapt
 
 function lijstTitel(){
+  if(lijstTitelVast) return 'Bonnen die ik nog mis — '+lijstTitelVast;
   var p=periodeLabel();
   // Maand gekozen maar geen jaar? Neem het jaar uit de lijst zelf, anders staat er alleen "jul".
   if(p&&activeJaar==='alle'){
@@ -1960,6 +1988,172 @@ function printLijstOntbrekend(){
 }
 // ============ EINDE LIJST ONTBREKENDE BONNEN ============
 
+// ============ VASTE ADRESJES PER MAAND ============
+// Voor plekken waar hij vaak komt met kleine, steeds gelijke bedragen (dagelijkse koffie).
+// Per winkel en per maand zet de app afschrijvingen en bonnen op datum naast elkaar.
+function vasteAdressen(){
+  var groepen={};
+  transacties.forEach(function(t){
+    if(t.type!=='af') return;
+    var k=naamSleutel(t.omschrijving);
+    if(!k) return;
+    (groepen[k]=groepen[k]||[]).push(t.bedrag);
+  });
+  var vast={};
+  Object.keys(groepen).forEach(function(k){
+    var b=groepen[k].slice().sort(function(x,y){return x-y;});
+    var mediaan=b[Math.floor(b.length/2)];
+    if(b.length>=5&&mediaan<=30) vast[k]=b.length;
+  });
+  return vast;
+}
+// Welke bonnen horen bij dit vaste adres? Geleerd uit bestaande koppelingen
+// ("Hagen KPG" hangt aan "Zettle_*The Flying Tru"), plus gelijkende namen.
+function bonnenVanAdres(txKey){
+  var bonKeys={};
+  transacties.forEach(function(t){
+    if(naamSleutel(t.omschrijving)!==txKey) return;
+    var bonId=matchesByTxId[t.id];
+    var b=bonId&&bonnen.find(function(x){return x.id===bonId;});
+    if(b) bonKeys[naamSleutel(b.omschrijving)]=true;
+  });
+  Object.keys(onthoudenNamen()).forEach(function(p){var d=p.split('|');if(d[1]===txKey) bonKeys[d[0]]=true;});
+  var voorbeeld=transacties.find(function(t){return naamSleutel(t.omschrijving)===txKey;});
+  return bonnen.filter(function(b){
+    var k=naamSleutel(b.omschrijving);
+    return bonKeys[k]||(voorbeeld&&naamLijktOp(b.omschrijving,voorbeeld.omschrijving));
+  });
+}
+var vastGroep=null,vastMaand=null;
+function maandSleutel(d){var p=(d||'').split('-');return p.length===3?p[1]+'-'+p[2]:'';}
+function toonVasteAdressen(){
+  var vast=vasteAdressen();
+  var keys=Object.keys(vast).sort(function(a,b){return vast[b]-vast[a];});
+  if(!keys.length) return;
+  if(!vastGroep||!vast[vastGroep]) vastGroep=keys[0];
+  vastMaand=null;
+  renderVasteAdressen();
+}
+function vastLabel(k){
+  var t=transacties.find(function(x){return naamSleutel(x.omschrijving)===k;});
+  return (t?t.omschrijving.replace(BETAALDIENST_PREFIX,''):k).replace(/\s+/g,' ').slice(0,28);
+}
+function vastKoppelVoorstel(txs,bons){
+  // Op dezelfde dag eerst gelijke bedragen (bonnen op tijd gesorteerd), daarna 1 dag later.
+  var paren=[],vrijeTx=txs.slice(),vrijeBon=bons.slice().sort(function(a,b){return (a.tijd||'').localeCompare(b.tijd||'');});
+  [0,1].forEach(function(dagen){
+    vrijeTx.slice().forEach(function(t){
+      var i=vrijeBon.findIndex(function(b){
+        var v=dagVerschil(b.datum,t.datum);
+        return v!==null&&v===dagen&&Math.abs(b.bedrag-t.bedrag)<=0.01&&(dagen===0||parseDatumNL(t.datum)>=parseDatumNL(b.datum));
+      });
+      if(i<0) return;
+      paren.push({tx:t,bon:vrijeBon[i]});
+      vrijeBon.splice(i,1);
+      vrijeTx.splice(vrijeTx.indexOf(t),1);
+    });
+  });
+  return {paren:paren,txZonder:vrijeTx,bonZonder:vrijeBon};
+}
+function renderVasteAdressen(){
+  var oud=document.getElementById('vast-overlay');
+  var scroll=oud?oud.querySelector('.confirm-box').scrollTop:0;
+  if(oud) oud.remove();
+  var vast=vasteAdressen();
+  var keys=Object.keys(vast).sort(function(a,b){return vast[b]-vast[a];});
+  var txsAll=transacties.filter(function(t){return t.type==='af'&&naamSleutel(t.omschrijving)===vastGroep;});
+  var bonsAll=bonnenVanAdres(vastGroep);
+  var maanden={};
+  txsAll.concat(bonsAll).forEach(function(x){var m=maandSleutel(x.datum);if(m) maanden[m]=true;});
+  var mlijst=Object.keys(maanden).sort(function(a,b){var pa=a.split('-'),pb=b.split('-');return (pb[1]-pa[1])||(pb[0]-pa[0]);});
+  if(!vastMaand||!maanden[vastMaand]){
+    // Standaard: de gekozen maand bovenaan de app, anders de nieuwste maand.
+    var gekozen=activeMaand!=='alle'&&mlijst.find(function(m){return parseInt(m.split('-')[0],10)===activeMaand&&(activeJaar==='alle'||m.split('-')[1]===activeJaar);});
+    vastMaand=gekozen||mlijst[0];
+  }
+  var txs=txsAll.filter(function(t){return maandSleutel(t.datum)===vastMaand;});
+  var bons=bonsAll.filter(function(b){return maandSleutel(b.datum)===vastMaand;});
+  var vrijeBons=bons.filter(function(b){return b.betaald!=='Contant'&&!b.handmatigGematcht;});
+  var afgehandeldeBons=bons.filter(function(b){return b.betaald==='Contant'||b.handmatigGematcht;});
+  var v=vastKoppelVoorstel(txs.filter(function(t){return !handmatigTxGematcht[t.id];}),vrijeBons);
+  var nieuw=v.paren.filter(function(p){return matchesByTxId[p.tx.id]!==p.bon.id;});
+  var rijen=[];
+  v.paren.forEach(function(p){rijen.push({d:p.tx.datum,html:
+    '<td>'+esc(p.tx.datum.slice(0,5))+'</td><td style="text-align:right">'+fmt(p.tx.bedrag)+'</td><td style="text-align:center">↔</td>'+
+    '<td>bon '+esc(p.bon.datum.slice(0,5))+(p.bon.tijd?' '+esc(p.bon.tijd):'')+'</td>'+
+    '<td>'+(matchesByTxId[p.tx.id]===p.bon.id?'<span style="color:#0f6e56">✓</span>':'<span style="color:#854f0b" title="Wordt gekoppeld bij goedkeuren">nieuw</span>')+'</td>'});});
+  txs.filter(function(t){return handmatigTxGematcht[t.id];}).forEach(function(t){rijen.push({d:t.datum,html:
+    '<td>'+esc(t.datum.slice(0,5))+'</td><td style="text-align:right">'+fmt(t.bedrag)+'</td><td></td><td style="color:#888">zonder bon afgehandeld</td><td><span style="color:#0f6e56">✓</span></td>'});});
+  v.txZonder.forEach(function(t){rijen.push({d:t.datum,html:
+    '<td>'+esc(t.datum.slice(0,5))+'</td><td style="text-align:right">'+fmt(t.bedrag)+'</td><td style="text-align:center">↔</td>'+
+    '<td style="color:#c0392b">bon mist</td><td>⚠</td>'});});
+  v.bonZonder.forEach(function(b){rijen.push({d:b.datum,html:
+    '<td>—</td><td></td><td style="text-align:center">↔</td>'+
+    '<td>bon '+esc(b.datum.slice(0,5))+' '+fmt(b.bedrag)+'<div style="display:flex;gap:4px;margin-top:3px">'+
+      '<button class="btw-pct-btn" style="flex:none;width:auto;padding:2px 6px;font-size:11px" onclick="vastBonAfhandelen('+b.id+',\'contant\')">💶 Contant</button>'+
+      '<button class="btw-pct-btn" style="flex:none;width:auto;padding:2px 6px;font-size:11px" onclick="vastBonAfhandelen('+b.id+',\'ok\')">✅ Klopt zo</button>'+
+    '</div></td><td>⚠</td>'});});
+  afgehandeldeBons.forEach(function(b){rijen.push({d:b.datum,html:
+    '<td>—</td><td></td><td></td><td style="color:#888">bon '+esc(b.datum.slice(0,5))+' '+fmt(b.bedrag)+' · '+(b.betaald==='Contant'?'contant':'afgehandeld')+'</td><td><span style="color:#0f6e56">✓</span></td>'});});
+  rijen.sort(function(a,b){return (parseDatumNL(a.d)||0)-(parseDatumNL(b.d)||0);});
+  var ov=document.createElement('div');
+  ov.id='vast-overlay';
+  ov.className='confirm-overlay show';
+  ov.innerHTML='<div class="confirm-box" style="max-width:440px;text-align:left;max-height:92vh;overflow-y:auto">'+
+    '<h3 style="text-align:center">☕ Vaste adresjes per maand</h3>'+
+    '<select style="margin:6px 0" onchange="vastGroep=this.value;vastMaand=null;renderVasteAdressen()">'+keys.map(function(k){
+      return '<option value="'+esc(k)+'"'+(k===vastGroep?' selected':'')+'>'+esc(vastLabel(k))+' ('+vast[k]+'x)</option>';}).join('')+'</select>'+
+    '<div style="display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 8px">'+mlijst.map(function(m){
+      return '<button class="btw-pct-btn'+(m===vastMaand?' active':'')+'" style="flex:none;width:auto;padding:4px 9px;font-size:11px" onclick="vastMaand=\''+m+'\';renderVasteAdressen()">'+maandLabel(m)+'</button>';}).join('')+'</div>'+
+    '<div style="font-size:12px;margin-bottom:6px"><b>'+txs.length+' afschrijving'+(txs.length!==1?'en':'')+' · '+bons.length+' bon'+(bons.length!==1?'nen':'')+'</b>'+
+      (v.txZonder.length?' · <span style="color:#c0392b">'+v.txZonder.length+' bon'+(v.txZonder.length!==1?'nen':'')+' mist</span>':'')+
+      (v.bonZonder.length?' · <span style="color:#854f0b">'+v.bonZonder.length+' zonder afschrijving</span>':'')+'</div>'+
+    (rijen.length?'<table style="width:100%;border-collapse:collapse;font-size:12px">'+rijen.map(function(r){return '<tr style="border-bottom:1px solid #f2f2f2">'+r.html.replace(/<td/g,'<td style="padding:5px 3px;vertical-align:top"')+'</tr>';}).join('')+'</table>':'<div class="empty">Niets in deze maand</div>')+
+    '<div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">'+
+      (nieuw.length?'<button class="btn-green" style="margin:0" onclick="vastKeurGoed()">✓ Koppel '+nieuw.length+' op datum</button>':'<div class="ok" style="margin:0;text-align:center">✓ Alles wat kan, is gekoppeld</div>')+
+      (v.txZonder.length?'<button class="btn-sec" style="margin:0" onclick="vastNaarOpdrachtgever()">📤 '+v.txZonder.length+' ontbrekende naar opdrachtgever</button>':'')+
+      '<button class="confirm-cancel" style="padding:10px;border-radius:10px;border:none;font-size:14px;cursor:pointer" onclick="document.getElementById(\'vast-overlay\').remove();renderTab()">Sluiten</button>'+
+    '</div></div>';
+  ov.addEventListener('click',function(e){if(e.target===ov){ov.remove();renderTab();}});
+  document.body.appendChild(ov);
+  ov.querySelector('.confirm-box').scrollTop=scroll;
+  vastHuidig=v;
+}
+var vastHuidig=null;
+function vastKeurGoed(){
+  if(!vastHuidig) return;
+  vastHuidig.paren.forEach(function(p){
+    if(matchesByTxId[p.tx.id]===p.bon.id) return;
+    // Oude handmatige koppelingen van deze bon aan een ándere afschrijving opruimen.
+    Object.keys(handmatigeKoppelingen).forEach(function(txId){
+      if(handmatigeKoppelingen[txId]===p.bon.id&&txId!==p.tx.id) delete handmatigeKoppelingen[txId];
+    });
+    if(genegeerd[p.tx.id]) genegeerd[p.tx.id]=genegeerd[p.tx.id].filter(function(id){return id!==p.bon.id;});
+    handmatigeKoppelingen[p.tx.id]=p.bon.id;
+  });
+  matchTransacties();
+  bewaarTransacties();
+  renderVasteAdressen();
+}
+function vastBonAfhandelen(bonId,hoe){
+  var b=bonnen.find(function(x){return x.id===bonId;});
+  if(!b) return;
+  if(hoe==='contant') b.betaald='Contant'; else b.handmatigGematcht=true;
+  bewaarBonnen();
+  matchTransacties();
+  renderVasteAdressen();
+}
+function vastNaarOpdrachtgever(){
+  if(!vastHuidig) return;
+  laatsteTxZonderBon=vastHuidig.txZonder.slice();
+  lijstUitgesloten={};
+  lijstTitelVast=vastLabel(vastGroep)+' · '+maandLabel(vastMaand);
+  document.getElementById('vast-overlay').remove();
+  toonLijstOntbrekend();
+}
+var lijstTitelVast=null;
+// ============ EINDE VASTE ADRESJES ============
+
 function renderBankTab(){
   var el=document.getElementById('tab-content');
   var matchableBonnen=gefilterdeBonnen().filter(function(b){
@@ -2016,6 +2210,9 @@ function renderBankTab(){
   }
 
   // Eerst de bonnen die nog gekoppeld moeten worden — die zijn het snelst af te handelen.
+  if(Object.keys(vasteAdressen()).length){
+    html+='<button class="btn-sec" onclick="toonVasteAdressen()">☕ Vaste adresjes per maand afvinken</button>';
+  }
   html+='<div class="section-title">Zakelijke bonnen nog niet volledig gematcht ('+nietGematchteBonnen.length+')</div>';
   if(!transacties.length){
     html+='<div class="empty">Nog geen bankafschrift geüpload</div>';
@@ -2113,6 +2310,7 @@ function renderBankTab(){
   }
 
   laatsteTxZonderBon=txNietGematcht;
+  lijstTitelVast=null;
   html+='<div class="section-title">Transacties zonder bon ('+txNietGematcht.length+')</div>';
   if(txNietGematcht.length){
     html+='<button class="btn-sec" style="margin-bottom:10px" onclick="toonLijstOntbrekend()">📤 Lijst ontbrekende bonnen voor opdrachtgever</button>';
