@@ -2013,6 +2013,46 @@ function renderBankTab(){
     html+='<div class="tip">💡 <span>Upload een CSV van het bankafschrift, of de PDF van het Visa-afschrift, om te checken welke bonnen al zijn afgeschreven</span></div>';
   }
 
+  // Eerst de bonnen die nog gekoppeld moeten worden — die zijn het snelst af te handelen.
+  html+='<div class="section-title">Zakelijke bonnen nog niet volledig gematcht ('+nietGematchteBonnen.length+')</div>';
+  if(!transacties.length){
+    html+='<div class="empty">Nog geen bankafschrift geüpload</div>';
+  } else if(!nietGematchteBonnen.length){
+    html+='<div class="empty">Alle zakelijke bonnen zijn gematcht ✓</div>';
+  } else {
+    var dubbeleBonnenBank=vindDubbeleBonnen();
+    html+=nietGematchteBonnen.map(function(b){
+      var koppelVeld=laatsteTxNietGematcht.length?
+        '<div style="padding:0 0 10px">'+
+          '<input type="text" id="zoek-bon-'+b.id+'" placeholder="🔍 Zoek of kies uit de lijst..." style="font-size:12px" oninput="filterKoppelOpties(\'bon\','+b.id+',this.value)" onfocus="toonKoppelOpties(\'bon\','+b.id+')" onblur="verbergKoppelOpties(\'bon\','+b.id+')">'+
+          '<div id="opties-bon-'+b.id+'" style="display:none;margin-top:4px"></div>'+
+        '</div>':'';
+      var gekoppeld=gekoppeldeTransacties(b.id);
+      var dubbelBadgeBank=dubbeleBonnenBank[b.id]?' <span class="badge" style="background:#fdecea;color:#c0392b" title="Zelfde bedrag en datum dicht bij elkaar — check of dit geen dubbele bon is">⚠️ Mogelijk dubbel</span>':'';
+      var voortgang;
+      if(b.herhalend){
+        voortgang=gekoppeld.length?
+          '<div style="font-size:11px;color:#0f6e56;margin-top:2px">🔁 Herhalend — al '+gekoppeld.length+'x gekoppeld (totaal '+fmt(gekoppeldTotaal(b.id))+'). Koppel hieronder de volgende afschrijving:</div>':
+          '<div style="font-size:11px;color:#0f6e56;margin-top:2px">🔁 Herhalende post — koppel hieronder de eerste afschrijving:</div>';
+      } else {
+        voortgang=gekoppeld.length?
+          '<div style="font-size:11px;color:#BA7517;margin-top:2px">Al gekoppeld: '+fmt(gekoppeldTotaal(b.id))+' van '+fmt(b.bedrag)+' ('+gekoppeld.length+' transactie'+(gekoppeld.length!==1?'s':'')+') — vul aan met een volgende:</div>':'';
+      }
+      return '<div class="bon-row" style="border-left:3px solid #1D9E75;padding-left:8px"><div class="bon-info"><div class="bon-name">🧾 '+(b.omschrijving||'—')+dubbelBadgeBank+'</div>'+
+        '<div class="bon-meta">'+b.datum+' · '+b.betaald+'</div>'+voortgang+'</div>'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-left:8px">'+
+          '<div class="bon-amt">'+fmt(b.bedrag)+'</div>'+
+          '<div class="bon-actions">'+
+            '<button class="btn-edit" onclick="markeerBonGematcht('+b.id+')" title="Handmatig als gematcht markeren (zonder specifieke transactie te koppelen)">✅</button>'+
+            '<button class="btn-edit" onclick="bewerkBon('+b.id+')" title="Bon bewerken">✏️</button>'+
+            '<button class="btn-del" onclick="vraagVerwijder('+b.id+')" title="Bon verwijderen">🗑</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+koppelVeld;
+    }).join('');
+  }
+
+
   var twijfelIds=Object.keys(twijfelgevallen).filter(function(txId){
     if(activeRekeningFilter==='alle') return true;
     var tx=transacties.find(function(t){return t.id===txId;});
@@ -2128,44 +2168,6 @@ function renderBankTab(){
           '<button class="btn-del" onclick="ontmarkeerTransactieGematcht(\''+t.id+'\')" title="Ongedaan maken">↩️</button>'+
         '</div>'+
       '</div>';
-    }).join('');
-  }
-
-  html+='<div class="section-title">Zakelijke bonnen nog niet volledig gematcht ('+nietGematchteBonnen.length+')</div>';
-  if(!transacties.length){
-    html+='<div class="empty">Nog geen bankafschrift geüpload</div>';
-  } else if(!nietGematchteBonnen.length){
-    html+='<div class="empty">Alle zakelijke bonnen zijn gematcht ✓</div>';
-  } else {
-    var dubbeleBonnenBank=vindDubbeleBonnen();
-    html+=nietGematchteBonnen.map(function(b){
-      var koppelVeld=laatsteTxNietGematcht.length?
-        '<div style="padding:0 0 10px">'+
-          '<input type="text" id="zoek-bon-'+b.id+'" placeholder="🔍 Zoek of kies uit de lijst..." style="font-size:12px" oninput="filterKoppelOpties(\'bon\','+b.id+',this.value)" onfocus="toonKoppelOpties(\'bon\','+b.id+')" onblur="verbergKoppelOpties(\'bon\','+b.id+')">'+
-          '<div id="opties-bon-'+b.id+'" style="display:none;margin-top:4px"></div>'+
-        '</div>':'';
-      var gekoppeld=gekoppeldeTransacties(b.id);
-      var dubbelBadgeBank=dubbeleBonnenBank[b.id]?' <span class="badge" style="background:#fdecea;color:#c0392b" title="Zelfde bedrag en datum dicht bij elkaar — check of dit geen dubbele bon is">⚠️ Mogelijk dubbel</span>':'';
-      var voortgang;
-      if(b.herhalend){
-        voortgang=gekoppeld.length?
-          '<div style="font-size:11px;color:#0f6e56;margin-top:2px">🔁 Herhalend — al '+gekoppeld.length+'x gekoppeld (totaal '+fmt(gekoppeldTotaal(b.id))+'). Koppel hieronder de volgende afschrijving:</div>':
-          '<div style="font-size:11px;color:#0f6e56;margin-top:2px">🔁 Herhalende post — koppel hieronder de eerste afschrijving:</div>';
-      } else {
-        voortgang=gekoppeld.length?
-          '<div style="font-size:11px;color:#BA7517;margin-top:2px">Al gekoppeld: '+fmt(gekoppeldTotaal(b.id))+' van '+fmt(b.bedrag)+' ('+gekoppeld.length+' transactie'+(gekoppeld.length!==1?'s':'')+') — vul aan met een volgende:</div>':'';
-      }
-      return '<div class="bon-row" style="border-left:3px solid #1D9E75;padding-left:8px"><div class="bon-info"><div class="bon-name">🧾 '+(b.omschrijving||'—')+dubbelBadgeBank+'</div>'+
-        '<div class="bon-meta">'+b.datum+' · '+b.betaald+'</div>'+voortgang+'</div>'+
-        '<div style="display:flex;align-items:center;gap:8px;margin-left:8px">'+
-          '<div class="bon-amt">'+fmt(b.bedrag)+'</div>'+
-          '<div class="bon-actions">'+
-            '<button class="btn-edit" onclick="markeerBonGematcht('+b.id+')" title="Handmatig als gematcht markeren (zonder specifieke transactie te koppelen)">✅</button>'+
-            '<button class="btn-edit" onclick="bewerkBon('+b.id+')" title="Bon bewerken">✏️</button>'+
-            '<button class="btn-del" onclick="vraagVerwijder('+b.id+')" title="Bon verwijderen">🗑</button>'+
-          '</div>'+
-        '</div>'+
-      '</div>'+koppelVeld;
     }).join('');
   }
 
