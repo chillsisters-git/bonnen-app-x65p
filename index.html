@@ -897,13 +897,23 @@ function matchTransacties(){
 
   // Vaste posten: heb je een afschrijving één keer met de hand aan een vaste post gekoppeld,
   // dan gaan volgende afschrijvingen met dezelfde naam er vanzelf aan hangen (ook zonder bedrag).
-  var vasteNaam={};
+  var vasteNaam={},vasteBedragen={};
   Object.keys(handmatigeKoppelingen).forEach(function(txId){
     var b=bonnen.find(function(x){return x.id===handmatigeKoppelingen[txId];});
     if(!b||!b.herhalend) return;
     var t=transacties.find(function(x){return x.id===txId;});
-    if(t) vasteNaam[naamSleutel(t.omschrijving)]=b;
+    if(!t) return;
+    vasteNaam[naamSleutel(t.omschrijving)]=b;
+    (vasteBedragen[b.id]=vasteBedragen[b.id]||[]).push(t.bedrag);
   });
+  // Het bedrag moet ook ongeveer kloppen (±15%): het bedrag op de bon, of anders de bedragen
+  // die je zelf al koppelde. Zo komt een ander contract of een eenmalige betaling bij dezelfde
+  // partij er niet aan te hangen.
+  function bedragPastBijVastePost(b,bedrag){
+    var ref=(b.bedrag>0?[b.bedrag]:[]).concat(vasteBedragen[b.id]||[]);
+    if(!ref.length) return false;
+    return ref.some(function(r){return Math.abs(bedrag-r)<=Math.max(0.5,r*0.15);});
+  }
   if(Object.keys(vasteNaam).length){
     transacties.forEach(function(tx){
       if(tx.type!=='af'||matchesByTxId[tx.id]||handmatigTxGematcht[tx.id]) return;
@@ -911,6 +921,7 @@ function matchTransacties(){
       if(!b) return;
       if(BEKENDE_REKENINGEN.indexOf(b.betaald)>=0&&!bankKlopt(b,tx)) return;
       if((genegeerd[tx.id]||[]).indexOf(b.id)>=0) return;
+      if(!bedragPastBijVastePost(b,tx.bedrag)) return;
       (matchesByBonId[b.id]=matchesByBonId[b.id]||[]).push(tx.id);
       matchesByTxId[tx.id]=b.id;
       delete twijfel[tx.id];
