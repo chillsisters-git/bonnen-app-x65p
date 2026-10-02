@@ -2355,6 +2355,45 @@ function vastNaarOpdrachtgever(){
 var lijstTitelVast=null;
 // ============ EINDE VASTE ADRESJES ============
 
+// Maandelijkse vaste post? Dan per maand controleren of hij er is. Geeft de maanden (binnen de
+// gekozen periode) terug waarin hij ontbreekt, terwijl het bankafschrift die datum wél dekt.
+function ontbrekendeMaanden(b){
+  var txs=gekoppeldeTransacties(b.id);
+  if(txs.length<2) return [];
+  var maanden={};
+  txs.forEach(function(t){var d=parseDatumNL(t.datum);if(d) maanden[d.getFullYear()*12+d.getMonth()]=true;});
+  var keys=Object.keys(maanden).map(Number).sort(function(a,b){return a-b;});
+  if(keys.length<2) return [];
+  // Maandelijks = de gekoppelde maanden liggen (bijna) steeds 1 maand uit elkaar.
+  var gaten=[];for(var i=1;i<keys.length;i++) gaten.push(keys[i]-keys[i-1]);
+  // Minstens de helft van de tussenpozen is precies 1 maand (een gemiste maand mag dus).
+  if(gaten.filter(function(g){return g===1;}).length*2<gaten.length) return [];
+  var laatste=sorteerOpDatumDesc(txs)[0];
+  var dag=parseInt(laatste.datum.split('-')[0],10);
+  var r=BEKENDE_REKENINGEN.indexOf(b.betaald)>=0?b.betaald:matchRekening(laatste.rekening);
+  var bereik=r&&txIndex().bereik[r];
+  if(!bereik) return [];
+  // Welke maanden bekijken we? Die van de gekozen maand/kwartaal/jaar.
+  var nu=new Date(),jaar=activeJaar!=='alle'?parseInt(activeJaar,10):nu.getFullYear();
+  var lijst=[];
+  if(activeMaand!=='alle') lijst=[activeMaand];
+  else if(activeKwartaal!=='alle'){var q=parseInt(activeKwartaal.slice(1),10);lijst=[q*3-2,q*3-1,q*3];}
+  else if(activeJaar!=='alle'){for(var m=1;m<=12;m++) lijst.push(m);}
+  else {for(var k=keys[0];k<=nu.getFullYear()*12+nu.getMonth();k++) lijst.push(k);} // alles: vanaf eerste termijn
+  var uit=[];
+  lijst.forEach(function(x){
+    var key=(activeMaand==='alle'&&activeKwartaal==='alle'&&activeJaar==='alle')?x:jaar*12+(x-1);
+    if(key<keys[0]||maanden[key]) return;
+    var y=Math.floor(key/12),mo=key%12;
+    var laatsteDag=new Date(y,mo+1,0).getDate();
+    var verwacht=new Date(y,mo,Math.min(dag,laatsteDag));
+    // Alleen melden als het afschrift die verwachte dag (plus een paar dagen speling) al dekt.
+    if(verwacht<bereik.min||new Date(verwacht.getTime()+4*86400000)>bereik.max) return;
+    uit.push(MAAND_NAMEN[mo]+' '+y);
+  });
+  return uit;
+}
+
 // ============ VASTE POSTEN ============
 function zetVastePost(bonId,aan){
   var b=bonnen.find(function(x){return x.id===bonId;});
@@ -2507,6 +2546,8 @@ function renderBankTab(){
             '<div style="font-size:11px;color:#888;margin-top:2px">'+esc(b.betaald||'')+(b.bedrag>0?' · bon '+fmt(b.bedrag):' · zonder bedrag')+'</div>'+
             '<div style="font-size:12px;color:#0f6e56;margin-top:4px">'+inPeriode.length+'x afgeschreven in '+esc(periode)+(inPeriode.length?' · samen '+fmt(inPeriode.reduce(function(s,t){return s+t.bedrag;},0)):'')+
               (laatste?' · laatste '+esc(laatste.datum):'')+'</div>'+
+            (function(){var mist=ontbrekendeMaanden(b);return mist.length?
+              '<div style="font-size:12px;color:#854f0b;background:#fef3e2;border-radius:6px;padding:4px 8px;margin-top:5px">⚠️ Niet gevonden in '+esc(mist.join(', '))+' — koppel hem hieronder (één keer)</div>':'';})()+
           '</div>'+
           '<div class="bon-actions" style="flex:none">'+
             (b.heeftFoto?'<button class="btn-edit" onclick="bekijkBonFoto('+b.id+')" title="Polis/bon bekijken">📷</button>':'')+
