@@ -69,6 +69,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
 .rekening-lijst{font-size:12px;color:#555;line-height:2}
 .rekening-rij{display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f5f5f5}
 .rekening-nr{font-family:monospace;font-size:13px;font-weight:600;color:#1D9E75}
+.fooi-hint{background:#fffaf0;border:1px solid #f0d9a8;border-radius:8px;padding:6px 8px;margin:0 0 8px 11px;font-size:12px;color:#854f0b}
 #screen-overzicht,#screen-upload,#screen-controleer,#screen-instellingen{display:none}
 .nav-bar{display:flex;background:#fff;border-top:1px solid #eee;position:fixed;bottom:0;left:0;right:0;z-index:10}
 .nav-btn{flex:1;padding:10px 4px 8px;background:none;border:none;cursor:pointer;font-size:10px;color:#888;display:flex;flex-direction:column;align-items:center;gap:3px}
@@ -94,6 +95,7 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
     <button class="btn-back" id="btn-back" onclick="goBack()" style="visibility:hidden">←</button>
     <h1 id="header-title">Overzicht</h1>
     <div style="display:flex;gap:6px">
+      <button class="btn-csv" id="btn-xlsx" onclick="exportExcel()" title="Excel-bestand met echte datums en bedragen — opent goed in Numbers, Google Sheets en Excel">↓ Excel</button>
       <button class="btn-csv" id="btn-csv" onclick="exportCSV()">↓ CSV</button>
       <button class="btn-csv" id="btn-zip" onclick="exportFotosZip()">📷 ZIP</button>
     </div>
@@ -541,6 +543,7 @@ function setScreen(s){
   document.getElementById('btn-back').style.visibility=(s==='controleer')?'visible':'hidden';
   document.getElementById('btn-csv').style.display=s==='overzicht'?'':'none';
   document.getElementById('btn-zip').style.display=s==='overzicht'?'':'none';
+  document.getElementById('btn-xlsx').style.display=s==='overzicht'?'':'none';
   var titles={overzicht:'Overzicht',upload:'Bon toevoegen',controleer:'Controleer bon',instellingen:'Instellingen'};
   document.getElementById('header-title').textContent=titles[s]||s;
   ['overzicht','upload','instellingen'].forEach(function(x){var nb=document.getElementById('nav-'+x);if(nb)nb.classList.toggle('active',x===s);});
@@ -663,7 +666,8 @@ function bankBadge(bon){
         ' <span onclick="event.stopPropagation();ontkoppelMatch('+bon.id+',\''+txIds[0]+'\')" style="cursor:pointer;color:#c0392b;font-size:11px" title="Ontkoppelen">✕</span>':'';
       var txDatum='';
       if(txIds.length===1){var gt=transacties.find(function(t){return t.id===txIds[0];});if(gt) txDatum=' · '+gt.datum.slice(0,5);}
-      return ' · <span class="badge badge-zakelijk">🔗 Gematcht'+(txIds.length>1?' ('+txIds.length+'x)':txDatum)+'</span>'+unlinkBtn;
+      var fooi=fooiBedrag(bon);
+      return ' · <span class="badge badge-zakelijk">🔗 Gematcht'+(txIds.length>1?' ('+txIds.length+'x)':txDatum)+(fooi?' · +'+fmt(fooi)+' fooi':'')+'</span>'+unlinkBtn;
     }
     return ' · <span class="badge badge-prive">🔶 Deels gematcht ('+fmt(gekoppeldTotaal(bon.id))+' / '+fmt(bon.bedrag)+')</span>';
   }
@@ -945,8 +949,91 @@ function isVolledigGematcht(bon){
   if(bon.herhalend) return false; // blijft altijd koppelbaar aan een volgende afschrijving
   var txIds=matchesByBonId[bon.id];
   if(!txIds||!txIds.length) return false;
-  return Math.abs(gekoppeldTotaal(bon.id)-bon.bedrag)<=0.01;
+  // Gelijk bedrag, of de bank schreef méér af dan op de bon staat (fooi): dan is de bon compleet.
+  return gekoppeldTotaal(bon.id)>=bon.bedrag-0.01;
 }
+
+// ============ FOOI ============
+// De opdrachtgever geeft vaak fooi: op de bon staat € 42,50, van de bank gaat € 47,00 af.
+// Die worden niet automatisch gekoppeld (te veel kans op een verkeerde koppeling), maar de app
+// toont ze als voorstel "💡 Mogelijk met fooi". Na koppelen telt de bon als gematcht en wordt
+// het verschil als fooi getoond. De fooi wordt niet opgeslagen maar steeds berekend uit de koppeling.
+var FOOI_MAX_PROCENT=0.30; // fooi mag tot 30% van het bonbedrag zijn...
+var FOOI_MIN_RUIMTE=5;     // ...en bij kleine bedragen altijd tot € 5
+var FOOI_MAX_DAGEN=4;      // afschrijving hooguit 4 dagen na de bon
+function kanFooiZijn(bonBedrag,txBedrag){
+  var v=(txBedrag||0)-(bonBedrag||0);
+  return bonBedrag>0&&v>0.01&&v<=Math.max(FOOI_MIN_RUIMTE,bonBedrag*FOOI_MAX_PROCENT);
+}
+// Fooi bij een gekoppelde bon: wat de bank méér afschreef dan het bonbedrag.
+function fooiBedrag(bon){
+  if(!bon||bon.herhalend||bon.handmatigGematcht) return 0;
+  var txIds=matchesByBonId[bon.id];
+  if(!txIds||!txIds.length) return 0;
+  var v=Math.round((gekoppeldTotaal(bon.id)-(bon.bedrag||0))*100)/100;
+  return v>0.01?v:0;
+}
+function fooiDatumOk(bon,tx){
+  var v=dagVerschil(bon.datum,tx.datum);
+  if(v===null||v>FOOI_MAX_DAGEN) return null;
+  // De afschrijving komt op of na de dag van de bon (hooguit 1 dag eerder, bij een datumfoutje).
+  if(parseDatumNL(tx.datum)<parseDatumNL(bon.datum)&&v>1) return null;
+  return v;
+}
+function txIsOpen(t){
+  return t.type==='af'&&!matchesByTxId[t.id]&&!handmatigTxGematcht[t.id]&&!twijfelgevallen[t.id];
+}
+function bonIsOpenVoorFooi(b){
+  return BEKENDE_REKENINGEN.indexOf(b.betaald)>=0&&!b.herhalend&&!b.handmatigGematcht&&
+    !(matchesByBonId[b.id]&&matchesByBonId[b.id].length);
+}
+function sorteerFooi(lijst){
+  return lijst.sort(function(a,b){
+    return ((b.opNaam?1:0)-(a.opNaam?1:0))||(a.dagen-b.dagen)||(a.fooi-b.fooi);
+  });
+}
+// Afschrijvingen zonder bon die bij deze bon kunnen horen als er fooi is gegeven.
+function fooiKandidatenVoorBon(bon){
+  if(!bon||!bonIsOpenVoorFooi(bon)) return [];
+  var uit=[];
+  transacties.forEach(function(t){
+    if(!txIsOpen(t)) return;
+    if(!kanFooiZijn(bon.bedrag,t.bedrag)) return;
+    if(!bankKlopt(bon,t)) return;
+    if((genegeerd[t.id]||[]).indexOf(bon.id)>=0) return;
+    var v=fooiDatumOk(bon,t);
+    if(v===null) return;
+    uit.push({tx:t,bon:bon,dagen:v,fooi:Math.round((t.bedrag-bon.bedrag)*100)/100,opNaam:naamLijktOp(bon.omschrijving,t.omschrijving)});
+  });
+  return sorteerFooi(uit);
+}
+// Bonnen zonder koppeling die bij deze afschrijving kunnen horen als er fooi is gegeven.
+function fooiKandidatenVoorTx(tx){
+  if(!tx||!txIsOpen(tx)) return [];
+  var uit=[];
+  bonnen.forEach(function(b){
+    if(!bonIsOpenVoorFooi(b)) return;
+    if(!kanFooiZijn(b.bedrag,tx.bedrag)) return;
+    if(!bankKlopt(b,tx)) return;
+    if((genegeerd[tx.id]||[]).indexOf(b.id)>=0) return;
+    var v=fooiDatumOk(b,tx);
+    if(v===null) return;
+    uit.push({tx:tx,bon:b,dagen:v,fooi:Math.round((tx.bedrag-b.bedrag)*100)/100,opNaam:naamLijktOp(b.omschrijving,tx.omschrijving)});
+  });
+  return sorteerFooi(uit);
+}
+function fooiHintHtml(kandidaten,vanuitBon){
+  if(!kandidaten.length) return '';
+  return '<div class="fooi-hint">💡 <b>Mogelijk met fooi</b> — '+(vanuitBon?'van de bank ging iets meer af dan op de bon staat:':'deze bon is iets lager dan de afschrijving:')+
+    kandidaten.slice(0,3).map(function(k){
+      var label=vanuitBon?
+        '🏦 '+esc(k.tx.datum.slice(0,5))+' · '+esc(k.tx.omschrijving||'—')+' · '+fmt(k.tx.bedrag):
+        '🧾 '+esc(k.bon.datum.slice(0,5))+' · '+esc(k.bon.omschrijving||'—')+' · '+fmt(k.bon.bedrag);
+      return '<button class="btw-pct-btn" style="display:block;width:100%;margin-top:5px;text-align:left;font-size:12px;background:#fff;border-color:#f0d9a8" onclick="koppelHandmatig(\''+k.tx.id+'\','+k.bon.id+')">'+
+        label+' <span style="color:#854f0b;font-weight:600">· fooi '+fmt(k.fooi)+'</span> — koppel</button>';
+    }).join('')+'</div>';
+}
+// ============ EINDE FOOI ============
 
 function koppelHandmatig(txId,bonId){
   handmatigeKoppelingen[txId]=bonId;
@@ -1100,6 +1187,7 @@ function voorstelVoor(bon,tx,paren,vanuitTx){
   if(isOnthouden(paren,bon,tx)&&(dagen===null||dagen<=45)) return {rang:0,reden:'eerder gekoppeld',dagen:dagen};
   if(!bank) return null;
   if(zelfdeBedrag&&dagen!==null&&dagen<=7) return {rang:1,reden:'zelfde bedrag',dagen:dagen};
+  if(kanFooiZijn(bon.bedrag,tx.bedrag)&&fooiDatumOk(bon,tx)!==null) return {rang:1,reden:'mogelijk met fooi (+'+fmt(tx.bedrag-bon.bedrag)+')',dagen:dagen+0.5};
   if(zelfdeBedrag&&naamLijktOp(bon.omschrijving,tx.omschrijving)&&dagen!==null&&dagen<=30) return {rang:2,reden:'zelfde bedrag en naam',dagen:dagen};
   if(naamLijktOp(bon.omschrijving,tx.omschrijving)&&dagen!==null&&dagen<=7) return {rang:3,reden:'lijkt op naam',dagen:dagen};
   if(zelfdeBedrag&&dagen!==null&&dagen<=21) return {rang:4,reden:'zelfde bedrag',dagen:dagen};
@@ -2513,6 +2601,7 @@ function renderBankTab(){
         voortgang=gekoppeld.length?
           '<div style="font-size:11px;color:#BA7517;margin-top:2px">Al gekoppeld: '+fmt(gekoppeldTotaal(b.id))+' van '+fmt(b.bedrag)+' ('+gekoppeld.length+' transactie'+(gekoppeld.length!==1?'s':'')+') — vul aan met een volgende:</div>':'';
       }
+      var fooiHint=gekoppeld.length?'':fooiHintHtml(fooiKandidatenVoorBon(b),true);
       return '<div class="bon-row" style="border-left:3px solid #1D9E75;padding-left:8px"><div class="bon-info"><div class="bon-name">🧾 '+(b.omschrijving||'—')+dubbelBadgeBank+'</div>'+
         '<div class="bon-meta">'+b.datum+' · '+b.betaald+'</div>'+voortgang+'</div>'+
         '<div style="display:flex;align-items:center;gap:8px;margin-left:8px">'+
@@ -2525,7 +2614,7 @@ function renderBankTab(){
             '<button class="btn-del" onclick="vraagVerwijder('+b.id+')" title="Bon verwijderen">🗑</button>'+
           '</div>'+
         '</div>'+
-      '</div>'+koppelVeld;
+      '</div>'+fooiHint+koppelVeld;
     }).join('');
   }
 
@@ -2613,8 +2702,9 @@ function renderBankTab(){
           '<button class="btn-del" style="padding:2px 6px;font-size:11px" onclick="ontkoppelMatch('+b.id+',\''+tx.id+'\')" title="Deze koppeling ontkoppelen">🔓</button>'+
         '</div>';
       }).join('');
+      var fooi=fooiBedrag(b);
       return '<div class="card" style="border-left:3px solid #1D9E75"><div class="bon-name" style="margin-bottom:2px">🧾 '+(b.omschrijving||'—')+'</div>'+
-        '<div style="font-size:11px;color:#888;margin-bottom:6px">'+b.datum+' · bonbedrag '+fmt(b.bedrag)+(txs.length>1?' · '+txs.length+' transacties':'')+'</div>'+
+        '<div style="font-size:11px;color:#888;margin-bottom:6px">'+b.datum+' · bonbedrag '+fmt(b.bedrag)+(fooi?' · <span style="color:#854f0b">fooi '+fmt(fooi)+'</span>':'')+(txs.length>1?' · '+txs.length+' transacties':'')+'</div>'+
         txRegels+
       '</div>';
     }).join('');
@@ -2665,7 +2755,7 @@ function renderBankTab(){
             '<button class="btn-del" onclick="vraagVerwijderTransactie(\''+t.id+'\')" title="Transactie verwijderen">🗑</button>'+
           '</div>'+
         '</div>'+
-      '</div>'+koppelVeld;
+      '</div>'+fooiHintHtml(fooiKandidatenVoorTx(t),false)+koppelVeld;
     }).join('');
   }
 
@@ -3028,7 +3118,8 @@ function normaliseerTijd(t){
 
 // Na het scannen: past de bon bij een afschrijving zonder bon? En zo niet op deze datum,
 // staat er dan wel een met hetzelfde bedrag op een andere dag? Dan is de datum waarschijnlijk
-// verkeerd uitgelezen — met één tik aan te passen.
+// verkeerd uitgelezen — met één tik aan te passen. Staat er alleen een iets hoger bedrag
+// (fooi), dan melden we dat ook.
 function controleerBankDatum(){
   var el=document.getElementById('form-bankcheck');
   if(!el) return;
@@ -3044,7 +3135,16 @@ function controleerBankDatum(){
     var r=matchRekening(t.rekening);
     return !r||r===betaald;
   });
-  if(!open.length) return;
+  if(!open.length){
+    // Geen afschrijving met precies dit bedrag — misschien wel een met fooi erbovenop?
+    var fooiTx=fooiKandidatenVoorBon({id:-1,datum:datum,bedrag:bedrag,betaald:betaald,omschrijving:document.getElementById('f-omschrijving').value});
+    if(!fooiTx.length) return;
+    var k=fooiTx[0];
+    el.style.cssText='display:block;font-size:12px;border-radius:8px;padding:8px 10px;margin-top:8px;background:#fffaf0;color:#854f0b;border:1px solid #f0d9a8';
+    el.innerHTML='💡 <b>Mogelijk met fooi:</b> op '+esc(k.tx.datum)+' ging '+fmt(k.tx.bedrag)+' af'+(k.tx.omschrijving?' ('+esc(k.tx.omschrijving)+')':'')+
+      ', dat is '+fmt(k.fooi)+' meer dan deze bon. Sla de bon op en koppel hem op het tabblad Bankafschrift — daar staat hij als voorstel klaar.';
+    return;
+  }
   var zelfdeDag=open.filter(function(t){return dagVerschil(t.datum,datum)===0;});
   if(zelfdeDag.length){
     el.style.cssText='display:block;font-size:12px;border-radius:8px;padding:8px 10px;margin-top:8px;background:#e6f7f1;color:#0f6e56';
@@ -3249,11 +3349,13 @@ function matchKolomWaarde(bon){
   }
   if(txIds&&txIds.length){
     if(isVolledigGematcht(bon)){
+      var fooi=fooiBedrag(bon);
+      var fooiTekst=fooi?' + fooi '+fmt(fooi):'';
       if(txIds.length===1){
         var tx=transacties.find(function(t){return t.id===txIds[0];});
-        return tx?'Gematcht ('+tx.datum+')':'Gematcht';
+        return (tx?'Gematcht ('+tx.datum+')':'Gematcht')+fooiTekst;
       }
-      return 'Gematcht ('+txIds.length+'x)';
+      return 'Gematcht ('+txIds.length+'x)'+fooiTekst;
     }
     return 'Deels gematcht ('+fmt(gekoppeldTotaal(bon.id))+' / '+fmt(bon.bedrag)+')';
   }
@@ -3261,16 +3363,99 @@ function matchKolomWaarde(bon){
   return '';
 }
 
-function exportCSV(){
-  var lijst=gefilterdeBonnen();
-  var rows=[['Datum','Omschrijving','Bedrag incl. BTW','BTW bedrag','Zakelijk/Priv\u00e9','Categorie','Betaald via','Bon aanwezig','Opmerking','Bankmatch']];
-  lijst.forEach(function(b){rows.push([b.datum,b.omschrijving,b.bedrag.toFixed(2),b.btw.toFixed(2),b.type,b.categorie||'',b.betaald||'','Ja',b.opmerking||'',matchKolomWaarde(b)]);});
-  var csv=rows.map(function(r){return r.join(';');}).join('\n');
-  var a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download='bonnen'+periodeBestandsnaam()+'.csv';
-  a.click();
+// ============ EXPORT (CSV en Excel) ============
+// Eerder: datum als tekst "17-08-2026" en bedrag als "42.50". Numbers en Google Sheets lazen
+// dat per regel anders (de ene datum als datum, de andere als tekst, soms dag en maand
+// omgedraaid), waardoor sorteren op datum niet werkte. Nu:
+//  - Excel-bestand (.xlsx): echte datums en echte bedragen, werkt overal goed (aanrader)
+//  - CSV: datum als 2026-08-17 (dat leest elk programma goed), velden tussen aanhalingstekens
+//    zodat een ; of enter in een omschrijving de kolommen niet verschuift, en op datum gesorteerd.
+var EXPORT_KOPPEN=['Datum','Omschrijving','Bedrag incl. BTW','BTW bedrag','Zakelijk/Privé','Categorie','Betaald via','Bon aanwezig','Opmerking','Bankmatch','Fooi (geen btw)'];
+function exportBonnenOpDatum(){
+  return gefilterdeBonnen().slice().sort(function(a,b){
+    return (parseDatumNL(a.datum)||0)-(parseDatumNL(b.datum)||0);
+  });
 }
+function isoDatum(d){
+  var x=parseDatumNL(d);
+  return x?x.getFullYear()+'-'+pad2(x.getMonth()+1)+'-'+pad2(x.getDate()):(d||'');
+}
+function downloadBlob(blob,naam){
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=naam;
+  document.body.appendChild(a);a.click();a.remove();
+}
+function exportCSV(){
+  var rows=[EXPORT_KOPPEN];
+  exportBonnenOpDatum().forEach(function(b){
+    var f=fooiBedrag(b);
+    rows.push([isoDatum(b.datum),b.omschrijving||'',(b.bedrag||0).toFixed(2),(b.btw||0).toFixed(2),b.type||'',b.categorie||'',b.betaald||'','Ja',b.opmerking||'',matchKolomWaarde(b),f?f.toFixed(2):'']);
+  });
+  var csv=rows.map(function(r){
+    return r.map(function(v){return '"'+String(v==null?'':v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';}).join(';');
+  }).join('\r\n');
+  // ﻿ zorgt dat é en € goed worden getoond in Excel/Numbers.
+  downloadBlob(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}),'bonnen'+periodeBestandsnaam()+'.csv');
+}
+
+var xlsxLaadBelofte=null;
+function laadXlsx(){
+  if(window.XLSX) return Promise.resolve(window.XLSX);
+  if(xlsxLaadBelofte) return xlsxLaadBelofte;
+  xlsxLaadBelofte=new Promise(function(resolve,reject){
+    var sc=document.createElement('script');
+    sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload=function(){window.XLSX?resolve(window.XLSX):reject(new Error('Excel-module niet beschikbaar'));};
+    sc.onerror=function(){xlsxLaadBelofte=null;reject(new Error('Excel-module kon niet geladen worden (geen internet?)'));};
+    document.head.appendChild(sc);
+  });
+  return xlsxLaadBelofte;
+}
+// Maakt een werkblad met echte datums (dd-mm-jjjj) en echte bedragen (€).
+function maakWerkblad(XLSX,koppen,regels,datumKol,bedragKols,breedtes){
+  var ws=XLSX.utils.aoa_to_sheet([koppen].concat(regels),{cellDates:true});
+  var bereik=XLSX.utils.decode_range(ws['!ref']);
+  for(var r=1;r<=bereik.e.r;r++){
+    var dc=ws[XLSX.utils.encode_cell({r:r,c:datumKol})];
+    if(dc&&dc.t==='d') dc.z='dd-mm-yyyy';
+    bedragKols.forEach(function(c){
+      var cel=ws[XLSX.utils.encode_cell({r:r,c:c})];
+      if(cel&&cel.t==='n') cel.z='€ #,##0.00';
+    });
+  }
+  ws['!cols']=breedtes.map(function(w){return {wch:w};});
+  ws['!autofilter']={ref:ws['!ref']};
+  return ws;
+}
+function exportExcel(){
+  var btn=document.getElementById('btn-xlsx');
+  var oud=btn?btn.textContent:'';
+  if(btn) btn.textContent='⏳';
+  laadXlsx().then(function(XLSX){
+    // Blad 1: bonnen
+    var bonRegels=exportBonnenOpDatum().map(function(b){
+      var f=fooiBedrag(b);
+      return [parseDatumNL(b.datum)||b.datum||'',b.omschrijving||'',b.bedrag||0,b.btw||0,b.type||'',b.categorie||'',b.betaald||'','Ja',b.opmerking||'',matchKolomWaarde(b),f||''];
+    });
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,maakWerkblad(XLSX,EXPORT_KOPPEN,bonRegels,0,[2,3,10],[12,40,14,12,11,28,22,8,24,30,12]),'Bonnen');
+    // Blad 2: afschrijvingen in dezelfde periode zonder bon (alle rekeningen) — handig voor de controle.
+    var zonder=transacties.filter(function(t){
+      return t.type==='af'&&inGekozenPeriode(t.datum)&&!matchesByTxId[t.id]&&!handmatigTxGematcht[t.id];
+    }).sort(function(a,b){return (parseDatumNL(a.datum)||0)-(parseDatumNL(b.datum)||0);});
+    var txRegels=zonder.map(function(t){
+      return [parseDatumNL(t.datum)||t.datum,t.omschrijving||'',t.bedrag||0,rekeningKort(t.rekening),twijfelgevallen[t.id]?'Twijfelgeval — kies bon in de app':''];
+    });
+    XLSX.utils.book_append_sheet(wb,maakWerkblad(XLSX,['Datum','Omschrijving (bank)','Bedrag','Rekening','Opmerking'],txRegels,0,[2],[12,44,12,16,30]),'Zonder bon');
+    XLSX.writeFile(wb,'bonnen'+periodeBestandsnaam()+'.xlsx',{cellDates:true});
+    if(btn) btn.textContent=oud;
+  }).catch(function(e){
+    if(btn) btn.textContent=oud;
+    alert('Excel maken lukte niet ('+e.message+'). Gebruik anders ↓ CSV.');
+  });
+}
+// ============ EINDE EXPORT ============
 
 // --- Permanente opslag transacties (Upstash, via /api/transacties) ---
 function laadTransacties(){
