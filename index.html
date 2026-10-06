@@ -117,6 +117,14 @@ input,select{width:100%;font-size:13px;padding:7px 8px;border-radius:8px;border:
     <div class="q-tabs" id="maand-tabs" style="margin-bottom:1rem"></div>
     <div class="grid2" id="stats-grid"></div>
     <div style="margin-bottom:1rem">
+      <select id="betaald-filter" onchange="setBetaaldFilter(this.value)" style="margin-bottom:6px">
+        <option value="alle">💳 Alle betaalwijzen</option>
+        <option value="BUNQ Zakelijk (7361)">Alleen BUNQ Zakelijk</option>
+        <option value="VISA (5749)">Alleen VISA</option>
+        <option value="BUNQ Privé (4183)">Alleen BUNQ Privé</option>
+        <option value="ABN Privé (4178)">Alleen ABN Privé</option>
+        <option value="Contant">Alleen contant</option>
+      </select>
       <input type="text" id="zoek-input" placeholder="🔍 Zoek op omschrijving, categorie of bedrag..." oninput="setZoekTerm(this.value)">
     </div>
     <div class="tabs">
@@ -472,8 +480,17 @@ function gefilterdeBonnen(){
       var haystack=((b.omschrijving||'')+' '+(b.categorie||'')+' '+(b.betaald||'')+' '+bedragStr+' '+bedragStr.replace('.',',')+(b.herhalend?' vaste post herhalend':'')).toLowerCase();
       zoekOk=haystack.indexOf(zoekTerm)>=0;
     }
-    return kwOk&&jaarOk&&zoekOk;
+    var betaaldOk=activeBetaald==='alle'||b.betaald===activeBetaald;
+    return kwOk&&jaarOk&&zoekOk&&betaaldOk;
   });
+}
+// Filter op betaalwijze (bijv. alleen VISA). Geldt voor de lijsten én voor alle downloads.
+var activeBetaald='alle';
+function setBetaaldFilter(v){
+  activeBetaald=v;
+  // Bankafschrift-tabblad meteen op dezelfde rekening zetten.
+  activeRekeningFilter=BEKENDE_REKENINGEN.indexOf(v)>=0?v:'alle';
+  renderOverzicht();
 }
 
 function setZoekTerm(v){
@@ -534,7 +551,7 @@ function periodeLabel(){
   return delen.join(' ');
 }
 function periodeBestandsnaam(){
-  return (activeJaar!=='alle'?'-'+activeJaar:'')+(activeKwartaal!=='alle'?'-'+activeKwartaal:'')+(activeMaand!=='alle'?'-'+pad2(activeMaand):'');
+  return (typeof activeBetaald!=='undefined'&&activeBetaald!=='alle'?'-'+activeBetaald.replace(/\s*\(.*\)/,'').replace(/\s+/g,'-'):'')+(activeJaar!=='alle'?'-'+activeJaar:'')+(activeKwartaal!=='alle'?'-'+activeKwartaal:'')+(activeMaand!=='alle'?'-'+pad2(activeMaand):'');
 }
 
 function setScreen(s){
@@ -3442,7 +3459,10 @@ function exportExcel(){
     XLSX.utils.book_append_sheet(wb,maakWerkblad(XLSX,EXPORT_KOPPEN,bonRegels,0,[2,3,10],[12,40,14,12,11,28,22,8,24,30,12]),'Bonnen');
     // Blad 2: afschrijvingen in dezelfde periode zonder bon (alle rekeningen) — handig voor de controle.
     var zonder=transacties.filter(function(t){
-      return t.type==='af'&&inGekozenPeriode(t.datum)&&!matchesByTxId[t.id]&&!handmatigTxGematcht[t.id];
+      // De zoekbalk telt ook hier mee: met "visa" erin krijg je alleen de Visa-afschrijvingen.
+      return t.type==='af'&&inGekozenPeriode(t.datum)&&!matchesByTxId[t.id]&&!handmatigTxGematcht[t.id]&&
+        voldoetAanZoek(t.bedrag,t.omschrijving,matchRekening(t.rekening))&&
+        (activeBetaald==='alle'||matchRekening(t.rekening)===activeBetaald);
     }).sort(function(a,b){return (parseDatumNL(a.datum)||0)-(parseDatumNL(b.datum)||0);});
     var txRegels=zonder.map(function(t){
       return [parseDatumNL(t.datum)||t.datum,t.omschrijving||'',t.bedrag||0,rekeningKort(t.rekening),twijfelgevallen[t.id]?'Twijfelgeval — kies bon in de app':''];
