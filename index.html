@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 12:07</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 12:33</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -1063,12 +1063,35 @@ function mergeLijst(lokaal,server,bekend,verwijderd){
   });
   return {lijst:uit,vanServer:vanServer};
 }
+// Veilig ophalen: bij een fout van de server NOOIT doen alsof de opslag leeg is
+// (anders zou een lege lijst over je gegevens heen geschreven kunnen worden).
+function haalJSON(url,veld){
+  return fetch(url).then(function(r){
+    return r.text().then(function(t){
+      var d=null;try{d=JSON.parse(t);}catch(e){}
+      if(!r.ok||!d||!Array.isArray(d[veld])) throw new Error('ophalen mislukt ('+r.status+(d&&d.error?': '+d.error:'')+')');
+      return d;
+    });
+  });
+}
+function postJSON(url,body){
+  return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:body}).then(function(r){
+    if(r.ok) return;
+    return r.text().then(function(t){var d=null;try{d=JSON.parse(t);}catch(e){}
+      throw new Error('opslaan mislukt ('+r.status+(d&&d.error?': '+d.error:(t?': '+t.slice(0,120):''))+')');});
+  });
+}
+// Eén keer opnieuw proberen na een korte pauze (tijdelijke storing bij de opslag).
+function metHerkansing(fn){
+  return fn().catch(function(e){
+    return new Promise(function(res){setTimeout(res,2500);}).then(fn).catch(function(e2){throw e2||e;});
+  });
+}
 function syncTekst(){var el=$('sync');if(el) el.textContent=opslaanBezig?'opslaan…':'';}
 function bewaarTransacties(){
   versieTeller++;opslaanBezig++;syncTekst();
-  txRij=txRij.then(function(){
-    return fetch('/api/transacties').then(function(r){return r.json();});
-  }).then(function(data){
+  txRij=txRij.then(function(){return metHerkansing(function(){
+    return haalJSON('/api/transacties','transacties').then(function(data){
     var server=(data&&data.transacties)||[];
     var m=mergeLijst(transacties,server,bekendeServerTxIds,verwijderdeTxIds);
     var sh=data.handmatig||{},sg=data.genegeerd||{},sx=data.txGematcht||{};
@@ -1080,30 +1103,22 @@ function bewaarTransacties(){
       if(bron.x[t.id]) x[t.id]=bron.x[t.id];
     });
     transacties=m.lijst;handmatigeKoppelingen=h;genegeerd=g;handmatigTxGematcht=x;
-    return fetch('/api/transacties',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({transacties:transacties,handmatig:h,genegeerd:g,txGematcht:x})})
-      .then(function(r){
-        if(!r.ok) throw new Error('opslaan mislukt ('+r.status+')');
-        bekendeServerTxIds=idSet(transacties);
-      });
-  }).catch(function(e){
+    return postJSON('/api/transacties',JSON.stringify({transacties:transacties,handmatig:h,genegeerd:g,txGematcht:x}))
+      .then(function(){bekendeServerTxIds=idSet(transacties);});
+  });});}).catch(function(e){
     console.error(e);zetMelding('⚠️ Opslaan van bankregels lukte niet: '+e.message+'. Herlaad de pagina en probeer opnieuw.','fout');
   }).then(function(){opslaanBezig--;syncTekst();herbereken();render();});
   return txRij;
 }
 function bewaarBonnen(){
   versieTeller++;opslaanBezig++;syncTekst();
-  bonnenRij=bonnenRij.then(function(){
-    return fetch('/api/bonnen').then(function(r){return r.json();});
-  }).then(function(data){
-    var m=mergeLijst(bonnen,(data&&data.bonnen)||[],bekendeServerBonIds,verwijderdeBonIds);
+  bonnenRij=bonnenRij.then(function(){return metHerkansing(function(){
+    return haalJSON('/api/bonnen','bonnen').then(function(data){
+    var m=mergeLijst(bonnen,data.bonnen,bekendeServerBonIds,verwijderdeBonIds);
     bonnen=m.lijst;
-    return fetch('/api/bonnen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bonnen:bonnen})})
-      .then(function(r){
-        if(!r.ok) throw new Error('opslaan mislukt ('+r.status+')');
-        bekendeServerBonIds=idSet(bonnen);
-      });
-  }).catch(function(e){
+    return postJSON('/api/bonnen',JSON.stringify({bonnen:bonnen}))
+      .then(function(){bekendeServerBonIds=idSet(bonnen);});
+  });});}).catch(function(e){
     console.error(e);zetMelding('⚠️ Opslaan van bonnen lukte niet: '+e.message+'. Herlaad de pagina en probeer opnieuw.','fout');
   }).then(function(){opslaanBezig--;syncTekst();herbereken();render();});
   return bonnenRij;
@@ -1141,8 +1156,8 @@ function haalFoto(id){
 function laadAlles(eerste){
   var startVersie=versieTeller;
   return Promise.all([
-    bonnenRij.then(function(){return fetch('/api/bonnen').then(function(r){return r.json();});}),
-    txRij.then(function(){return fetch('/api/transacties').then(function(r){return r.json();});})
+    bonnenRij.then(function(){return haalJSON('/api/bonnen','bonnen');}),
+    txRij.then(function(){return haalJSON('/api/transacties','transacties');})
   ]).then(function(res){
     // Is er intussen hier iets gewijzigd (bijv. een afschrift ingelezen)? Dan de verversing
     // overslaan: anders zouden de nieuwe regels overschreven worden door de oude server-versie.
@@ -1166,7 +1181,7 @@ function laadAlles(eerste){
 }
 var laatsteVerversing=0;
 function ververs(){
-  if(Date.now()-laatsteVerversing<5000||opslaanBezig||importBezig||$('modal').innerHTML) return;
+  if(Date.now()-laatsteVerversing<30000||opslaanBezig||importBezig||$('modal').innerHTML) return;
   laatsteVerversing=Date.now();
   laadAlles(false);
 }
