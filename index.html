@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 b</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 c</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -778,7 +778,9 @@ var bonFormCtx=null;       // {txId, bonId(bewerken), previewSrc}
 
 // ---------- Kleine hulpjes ----------
 function $(id){return document.getElementById(id);}
-function stempel(x){x.gewijzigd=Date.now();}
+var versieTeller=0; // telt lokale wijzigingen; een verversing die daarvóór begon mag die niet overschrijven
+var importBezig=false;
+function stempel(x){x.gewijzigd=Date.now();versieTeller++;}
 function zetDoor(x){x.door=gebruiker||'';x.doorOp=nuLabel();}
 function rekNaam(t){return matchRekening(t.rekening);}
 function rekKortT(t){return t.rekening?rekeningKort(t.rekening):'Onbekende rekening';}
@@ -984,7 +986,7 @@ function mergeLijst(lokaal,server,bekend,verwijderd){
 }
 function syncTekst(){var el=$('sync');if(el) el.textContent=opslaanBezig?'opslaan…':'';}
 function bewaarTransacties(){
-  opslaanBezig++;syncTekst();
+  versieTeller++;opslaanBezig++;syncTekst();
   txRij=txRij.then(function(){
     return fetch('/api/transacties').then(function(r){return r.json();});
   }).then(function(data){
@@ -1011,7 +1013,7 @@ function bewaarTransacties(){
   return txRij;
 }
 function bewaarBonnen(){
-  opslaanBezig++;syncTekst();
+  versieTeller++;opslaanBezig++;syncTekst();
   bonnenRij=bonnenRij.then(function(){
     return fetch('/api/bonnen').then(function(r){return r.json();});
   }).then(function(data){
@@ -1035,10 +1037,14 @@ function haalFoto(id){
   return fetch('/api/bonnen?type=foto&id='+encodeURIComponent(id)).then(function(r){return r.json();}).then(function(d){return d&&d.foto||'';});
 }
 function laadAlles(eerste){
+  var startVersie=versieTeller;
   return Promise.all([
     bonnenRij.then(function(){return fetch('/api/bonnen').then(function(r){return r.json();});}),
     txRij.then(function(){return fetch('/api/transacties').then(function(r){return r.json();});})
   ]).then(function(res){
+    // Is er intussen hier iets gewijzigd (bijv. een afschrift ingelezen)? Dan de verversing
+    // overslaan: anders zouden de nieuwe regels overschreven worden door de oude server-versie.
+    if(!eerste&&(versieTeller!==startVersie||importBezig||opslaanBezig)) return;
     bonnen=(res[0]&&res[0].bonnen)||[];
     var d=res[1]||{};
     transacties=d.transacties||[];
@@ -1058,7 +1064,7 @@ function laadAlles(eerste){
 }
 var laatsteVerversing=0;
 function ververs(){
-  if(Date.now()-laatsteVerversing<5000||opslaanBezig||$('modal').innerHTML) return;
+  if(Date.now()-laatsteVerversing<5000||opslaanBezig||importBezig||$('modal').innerHTML) return;
   laatsteVerversing=Date.now();
   laadAlles(false);
 }
@@ -1113,7 +1119,9 @@ function parseMT940(text){
 // Welke regels stonden er al in (bijv. eerder als CSV ingelezen)? Zelfde rekening, af/bij,
 // bedrag en datum (eerst exact, dan 1 dag verschil). De omschrijving telt niet mee:
 // die ziet er in een MT940 anders uit dan in een CSV.
+var aangevuld=0;
 function splitsNieuwBestaand(gevonden){
+  aangevuld=0;
   var geclaimd={},bestaand=[],rest=gevonden.slice();
   [0,1].forEach(function(maxDag){
     rest=rest.filter(function(n){
@@ -1126,7 +1134,12 @@ function splitsNieuwBestaand(gevonden){
         if(d===null||d>maxDag) continue;
         hit=t;break;
       }
-      if(hit){geclaimd[hit.id]=true;bestaand.push(hit);return false;}
+      if(hit){
+        geclaimd[hit.id]=true;bestaand.push(hit);
+        // Eerder ingelezen zonder omschrijving (oude versie)? Dan nu aanvullen.
+        if(!(hit.omschrijving||'').trim()&&n.omschrijving){hit.omschrijving=n.omschrijving;hit.gewijzigd=Date.now();aangevuld++;}
+        return false;
+      }
       return true;
     });
   });
@@ -1145,6 +1158,7 @@ function decodeerTekst(buf){
 function afschriftGekozen(input){
   var f=input.files[0];input.value='';
   if(!f) return;
+  importBezig=true;versieTeller++;
   zetMelding('⏳ "'+f.name+'" wordt gelezen…','info');render();
   var reader=new FileReader();
   reader.onload=function(e){
@@ -1168,7 +1182,7 @@ function afschriftGekozen(input){
       if(r.lijst.length&&onbekend.length){vraagRekening(r,onbekend,f.name,dataUrl);return;}
       importeer(r.lijst,f.name,r.soort,dataUrl);
     })
-      .catch(function(err){zetMelding('Het bestand "'+f.name+'" kon niet gelezen worden ('+err.message+').','fout');render();});
+      .catch(function(err){importBezig=false;zetMelding('Het bestand "'+f.name+'" kon niet gelezen worden ('+err.message+').','fout');render();});
   };
   reader.readAsArrayBuffer(f);
 }
@@ -1230,6 +1244,7 @@ function vraagRekening(r,onbekend,naam,dataUrl){
     '<div class="balk" style="margin-top:12px"><button class="knopje" data-act="modal-dicht">Annuleren</button></div></div>');
 }
 function importeer(gevonden,naam,soort,dataUrl){
+  importBezig=false;versieTeller++;
   if(!gevonden.length){
     zetMelding('In "'+naam+'" zijn geen bankregels gevonden. Is het een MT940, een CSV van de bank of een Visa-afschrift van ICS?','fout');
     render();return;
@@ -1255,7 +1270,8 @@ function importeer(gevonden,naam,soort,dataUrl){
   // Rekening onbekend in het bestand? Even melden.
   var zonderRek=r.nieuw.filter(function(t){return !matchRekening(t.rekening);}).length;
   zetMelding('✓ '+soort+' "'+naam+'": '+r.nieuw.length+' nieuwe regel'+(r.nieuw.length!==1?'s':'')+
-    (r.bestaand.length?', '+r.bestaand.length+' stond'+(r.bestaand.length!==1?'en':'')+' er al in':'')+'.'+
+    (r.bestaand.length?', '+r.bestaand.length+' stond'+(r.bestaand.length!==1?'en':'')+' er al in':'')+
+    (aangevuld?' ('+aangevuld+' daarvan kreeg'+(aangevuld!==1?'en':'')+' alsnog een omschrijving)':'')+'.'+
     (zonderRek?' Let op: '+zonderRek+' regel'+(zonderRek!==1?'s hebben':' heeft')+' een onbekend rekeningnummer.':'')+
     ' Origineel wordt bewaard voor de boekhouder…','ok');
   // Naar de periode van dit afschrift springen.
@@ -2004,7 +2020,7 @@ document.addEventListener('click',function(e){
       var pct=+el.getAttribute('data-pct'),bed=parseAmt($('bf-bedrag').value);
       $('bf-btw').value=(bed-bed/(1+pct/100)).toFixed(2);break;
     case 'bon-opslaan': bonOpslaan();break;
-    case 'modal-dicht': sluitModal();break;
+    case 'modal-dicht': if(window._afsWacht){window._afsWacht=null;importBezig=false;} sluitModal();break;
     case 'naar-todo': tab='verwerken';fWeergave='todo';fRek='alle';render();break;
     case 'opvragen-kopieer':
       var ta=$('opvraag-tekst');
