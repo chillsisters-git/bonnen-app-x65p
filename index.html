@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 10:38</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 10:42</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -754,7 +754,7 @@ var STATUS={
   opvragen:   {label:'📤 Bon opgevraagd',    kleur:'blauw', klaar:false},
   verkoop:    {label:'Verkoopfactuur',       kleur:'groen', klaar:true},
   terug:      {label:'↩ Terugbetaling',      kleur:'groen', klaar:true},
-  overboeking:{label:'🔁 Eigen overboeking', kleur:'grijs', klaar:true},
+  overboeking:{label:'🔁 Eigen overboeking (kruispost)', kleur:'grijs', klaar:true},
   storting:   {label:'Privé storting',       kleur:'grijs', klaar:true},
   overig:     {label:'Overig',               kleur:'groen', klaar:true},
   twijfel:    {label:'Kies de juiste bon',   kleur:'oranje',klaar:false},
@@ -1714,8 +1714,8 @@ function renderPaneel(t,paren){
     h+='<h4>Wat is deze bijschrijving?</h4><div class="acties">'+
       knop('status','🧾 Betaling verkoopfactuur',id+' data-code="verkoop"')+
       knop('terug-kies','↩ Terugbetaling van een bon',id)+
-      knop('status','🔁 Eigen overboeking',id+' data-code="overboeking"')+
-      knop('status','Privé storting',id+' data-code="storting"')+
+      knop('status','🔁 Eigen overboeking (kruispost)',id+' data-code="overboeking"')+
+      knop('status','Privé storting (van privérekening)',id+' data-code="storting"')+
       knop('status','Overig',id+' data-code="overig"')+
     '</div><div data-terug="'+esc(t.id)+'"></div>';
   }
@@ -1732,7 +1732,7 @@ function voorstelHtml(t,v){
     '<button class="knop" style="padding:8px 12px" data-act="koppel" data-tx="'+esc(t.id)+'" data-bon="'+b.id+'">Koppel</button></div></div>';
 }
 function overboekingHtml(t,p){
-  return '<div class="voorstel" style="border-color:#c9d8f7;background:var(--blauw-bg)"><div><div class="rede" style="color:var(--blauw)">🔁 Eigen overboeking?</div>'+
+  return '<div class="voorstel" style="border-color:#c9d8f7;background:var(--blauw-bg)"><div><div class="rede" style="color:var(--blauw)">🔁 Eigen overboeking (kruispost)?</div>'+
     '<div class="klein">'+(p.type==='bij'?'Komt bij op ':'Gaat af van ')+esc(rekKortT(p))+' op '+esc(p.datum)+' · '+fmt(p.bedrag)+'</div></div>'+
     '<div class="acties"><button class="knopje" data-act="geen-overboeking" data-tx="'+esc(t.id)+'" data-partner="'+esc(p.id)+'">✕ Nee</button>'+
     '<button class="knop" style="padding:8px 12px" data-act="overboeking" data-tx="'+esc(t.id)+'" data-partner="'+esc(p.id)+'">Ja, beide markeren</button></div></div>';
