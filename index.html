@@ -1174,35 +1174,40 @@ function afschriftGekozen(input){
 // Revolut (zakelijk en privé) levert een CSV met o.a. de kolommen State, Amount en Fee.
 function isRevolutCSV(tekst){
   var kop=(tekst.split(/\r?\n/)[0]||'').toLowerCase();
-  return kop.indexOf('state')>=0&&kop.indexOf('amount')>=0&&(kop.indexOf('completed')>=0||kop.indexOf('started')>=0);
+  var en=kop.indexOf('state')>=0&&kop.indexOf('amount')>=0&&(kop.indexOf('completed')>=0||kop.indexOf('started')>=0);
+  var nl=kop.indexOf('status')>=0&&kop.indexOf('bedrag')>=0&&(kop.indexOf('voltooid')>=0||kop.indexOf('startdatum')>=0);
+  return en||nl;
 }
 function parseRevolutCSV(tekst){
   var regels=tekst.split(/\r?\n/).filter(function(l){return l.trim();});
   var delim=detectDelimiter(regels[0]);
   var kop=splitCsvLine(regels[0],delim).map(function(h){return h.trim().toLowerCase();});
   function kol(test){for(var i=0;i<kop.length;i++) if(test(kop[i])) return i;return -1;}
-  var iDatum=kol(function(h){return h.indexOf('completed')>=0;});
-  if(iDatum<0) iDatum=kol(function(h){return h.indexOf('started')>=0;});
-  var iBedrag=kol(function(h){return h==='amount'||h==='payment amount'||h==='total amount';});
-  if(iBedrag<0) iBedrag=kol(function(h){return h.indexOf('amount')>=0&&h.indexOf('orig')<0&&h.indexOf('balance')<0;});
-  var iFee=kol(function(h){return h==='fee'||h.indexOf('fee')===0;});
-  var iState=kol(function(h){return h==='state';});
-  var iOms=kol(function(h){return h==='description';});
-  var iRef=kol(function(h){return h==='reference';});
-  var iCur=kol(function(h){return h==='currency'||h==='payment currency';});
+  var iDatum=kol(function(h){return h.indexOf('completed')>=0||h.indexOf('voltooid')>=0;});
+  var iStart=kol(function(h){return h.indexOf('started')>=0||h.indexOf('startdatum')>=0;});
+  if(iDatum<0) iDatum=iStart;
+  var iBedrag=kol(function(h){return h==='amount'||h==='payment amount'||h==='total amount'||h==='bedrag';});
+  if(iBedrag<0) iBedrag=kol(function(h){return (h.indexOf('amount')>=0||h.indexOf('bedrag')>=0)&&h.indexOf('orig')<0&&h.indexOf('balance')<0;});
+  var iFee=kol(function(h){return h==='fee'||h.indexOf('fee')===0||h==='kosten';});
+  var iState=kol(function(h){return h==='state'||h==='status';});
+  var iOms=kol(function(h){return h==='description'||h==='beschrijving'||h==='omschrijving';});
+  var iRef=kol(function(h){return h==='reference'||h==='referentie';});
+  var iType=kol(function(h){return h==='type';});
+  var iCur=kol(function(h){return h==='currency'||h==='payment currency'||h==='valuta';});
   var uit=[],st=Date.now();
   for(var r=1;r<regels.length;r++){
     var c=splitCsvLine(regels[r],delim);
     var state=iState>=0?(c[iState]||'').trim().toUpperCase():'COMPLETED';
-    if(state&&state!=='COMPLETED') continue; // geweigerd, teruggedraaid of nog bezig: geen echte betaling
-    var datum=normaliseerDatum(c[iDatum]);
+    if(state&&state!=='COMPLETED'&&state!=='VOLTOOID') continue; // geweigerd, ongedaan gemaakt of nog bezig: geen echte betaling
+    var datum=normaliseerDatum(c[iDatum])||(iStart>=0?normaliseerDatum(c[iStart]):null);
     if(!datum) continue;
     var bedrag=normaliseerBedrag(c[iBedrag]);
     var fee=iFee>=0?Math.abs(normaliseerBedrag(c[iFee])):0;
-    var af=bedrag<0;
+    var af=bedrag<0||(bedrag===0&&fee>0); // alleen kosten (bijv. Premium-plan) = afschrijving
     var totaal=Math.abs(bedrag)+(af?fee:-fee);
     if(!(totaal>0)) continue;
-    var oms=((iOms>=0?c[iOms]:'')||'').trim();
+    var oms=((iOms>=0?c[iOms]:'')||'').trim().replace(/\{xPay\}\s*/g,'').replace(/\{card\}/g,'kaart');
+    if(!oms&&iType>=0) oms=(c[iType]||'').trim();
     if(iRef>=0&&c[iRef]&&c[iRef].trim()&&c[iRef].trim()!==oms) oms+=' - '+c[iRef].trim();
     var cur=iCur>=0?(c[iCur]||'').trim().toUpperCase():'';
     if(cur&&cur!=='EUR') oms+=' ('+cur+')';
@@ -1740,9 +1745,58 @@ function renderKwartaal(){
     '<div class="balk"><button class="knop" id="pk-knop" data-act="pakketje">📦 Pakketje '+esc(periodeLabel())+'</button>'+
     '<button class="knop licht" id="pk-excel" data-act="alleen-excel">📊 Alleen Excel</button></div>'+
     '<div class="klein" id="pk-voortgang" style="margin-top:6px"></div></div>';
+  h+=renderAfschriftenLijst();
   h+='<div class="dag">Veiligheid</div><div class="kaart"><p class="klein" style="margin-bottom:8px">Download af en toe een back-up van alle bonnen, bankregels en koppelingen (zonder foto\'s; die blijven veilig op de server).</p>'+
     '<button class="knop licht" data-act="backup">💾 Back-up downloaden</button></div>';
   return h;
+}
+
+// ---------- Geüploade afschriften (met verwijderen) ----------
+var afsAllesTonen=false;
+function afschriftGroepen(){
+  var g={};
+  transacties.forEach(function(t){
+    var id=t.afschriftId||'oud';
+    var x=g[id]||(g[id]={id:id,naam:id==='oud'?'Eerder ingelezen (zonder naam)':(t.afschriftNaam||'Afschrift'),geupload:t.geupload||'',reks:{},n:0,af:0,bij:0,van:null,tot:null});
+    x.n++;x.reks[rekKortT(t)]=true;
+    var d=parseDatumNL(t.datum);
+    if(d){if(!x.van||d<x.van) x.van=d;if(!x.tot||d>x.tot) x.tot=d;}
+  });
+  return Object.keys(g).map(function(k){return g[k];}).sort(function(a,b){
+    if(a.id==='oud') return 1;if(b.id==='oud') return -1;
+    return (+b.id.replace('afs','')||0)-(+a.id.replace('afs','')||0);
+  });
+}
+function kortDatum(d){return d?d.getDate()+' '+MAAND_NAMEN[d.getMonth()]+' '+d.getFullYear():'?';}
+function renderAfschriftenLijst(){
+  var lijst=afschriftGroepen();
+  if(!lijst.length) return '';
+  var toon=afsAllesTonen?lijst:lijst.slice(0,8);
+  var h='<div class="dag">Geüploade afschriften ('+lijst.length+')</div>';
+  toon.forEach(function(g){
+    h+='<div class="bon"><div style="min-width:0;flex:1"><div class="oms">📄 '+esc(g.naam)+'</div>'+
+      '<div class="sub">'+esc(Object.keys(g.reks).join(', '))+' · '+kortDatum(g.van)+' – '+kortDatum(g.tot)+' · '+g.n+' regel'+(g.n!==1?'s':'')+
+      (g.geupload?' · geüpload '+esc(g.geupload):'')+'</div></div>'+
+      (g.id==='oud'?'':'<button class="knopje" data-act="afs-weg" data-afs="'+esc(g.id)+'" title="Dit afschrift en zijn regels verwijderen">🗑</button>')+'</div>';
+  });
+  if(lijst.length>8) h+='<button class="knopje" data-act="afs-alles">'+(afsAllesTonen?'Minder tonen':'Alle '+lijst.length+' tonen')+'</button>';
+  return h;
+}
+function verwijderAfschrift(id){
+  var weg=transacties.filter(function(t){return t.afschriftId===id;});
+  var gekoppeld=weg.filter(function(t){return matchesByTxId[t.id]!=null||t.status;}).length;
+  var g=afschriftGroepen().filter(function(x){return x.id===id;})[0];
+  if(!g) return;
+  if(!confirm('Afschrift "'+g.naam+'" verwijderen?\n\n'+weg.length+' bankregel'+(weg.length!==1?'s':'')+' ('+kortDatum(g.van)+' – '+kortDatum(g.tot)+') verdwijnen uit de app.'+
+    (gekoppeld?'\n'+gekoppeld+' daarvan '+(gekoppeld!==1?'zijn':'is')+' al afgehandeld; die koppelingen worden losgemaakt. De bonnen zelf blijven staan.':'\nBonnen blijven gewoon staan.'))) return;
+  var ids={};weg.forEach(function(t){ids[t.id]=true;verwijderdeTxIds[t.id]=true;});
+  transacties=transacties.filter(function(t){return !ids[t.id];});
+  Object.keys(ids).forEach(function(k){delete handmatigeKoppelingen[k];delete genegeerd[k];delete handmatigTxGematcht[k];});
+  // Regels uit een ander afschrift die dit bestand als "origineel" kregen: dat loskoppelen.
+  transacties.forEach(function(t){if(t.afsOrigineel===id){delete t.afsOrigineel;delete t.afsOrigineelNaam;stempel(t);}});
+  if(openTxId&&ids[openTxId]) openTxId=null;
+  zetMelding('✓ Afschrift "'+g.naam+'" verwijderd ('+weg.length+' regels). Je kunt het nu opnieuw uploaden.','ok');
+  naWijziging(true,false);
 }
 
 // ====================================================================================
@@ -1951,6 +2005,8 @@ document.addEventListener('click',function(e){
     case 'pakketje': maakPakketje(true);break;
     case 'alleen-excel': maakPakketje(false);break;
     case 'backup': downloadBackup();break;
+    case 'afs-weg': verwijderAfschrift(el.getAttribute('data-afs'));break;
+    case 'afs-alles': afsAllesTonen=!afsAllesTonen;render();break;
   }
 });
 document.addEventListener('change',function(e){
