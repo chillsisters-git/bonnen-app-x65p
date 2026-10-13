@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 12:33</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 14:53</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -99,7 +99,7 @@ a{color:var(--blauw)}
   <div id="inhoud"><div class="laden">Gegevens laden…</div></div>
 </div>
 <div id="modal"></div>
-<input type="file" id="afschrift-input" accept=".sta,.940,.mt940,.txt,.csv,.pdf,application/pdf,text/plain,text/csv" style="display:none">
+<input type="file" id="afschrift-input" accept=".sta,.940,.mt940,.txt,.tab,.csv,.pdf,application/pdf,text/plain,text/csv" style="display:none">
 <input type="file" id="bon-input" accept="image/*,application/pdf" style="display:none">
 <input type="file" id="bon-camera" accept="image/*" capture="environment" style="display:none">
 <script>
@@ -416,7 +416,7 @@ function voorstelVoor(bon,tx,paren,vanuitTx){
   if(bon.herhalend){
     // Vaste post (polis, abonnement…): het bedrag doet er niet toe, de naam wel.
     var bankOk=BEKENDE_REKENINGEN.indexOf(bon.betaald)<0||bankKlopt(bon,tx);
-    if(isOnthouden(paren,bon,tx)&&bankOk) return {rang:0,reden:'eerder gekoppeld',dagen:0,vast:true};
+    if(isOnthouden(paren,bon,tx)&&bankOk) return {rang:0,reden:'bekende naam',dagen:0,vast:true};
     if(naamLijktOp(bon.omschrijving,tx.omschrijving)&&bankOk) return {rang:0,reden:'naam lijkt erop',dagen:0,vast:true};
     if(Math.abs((bon.bedrag||0)-(tx.bedrag||0))<=0.01&&bon.bedrag>0&&bankOk) return {rang:1,reden:'zelfde bedrag',dagen:0,vast:true};
     // Onder een afschrijving staan alle vaste posten altijd in de lijst (na de echte voorstellen).
@@ -425,7 +425,7 @@ function voorstelVoor(bon,tx,paren,vanuitTx){
   var zelfdeBedrag=Math.abs((bon.bedrag||0)-(tx.bedrag||0))<=0.01;
   var dagen=dagVerschil(bon.datum,tx.datum);
   var bank=bankKlopt(bon,tx);
-  if(isOnthouden(paren,bon,tx)&&(dagen===null||dagen<=45)) return {rang:0,reden:'eerder gekoppeld',dagen:dagen};
+  if(isOnthouden(paren,bon,tx)&&(dagen===null||dagen<=45)) return {rang:0,reden:'bekende naam',dagen:dagen};
   if(!bank) return null;
   if(zelfdeBedrag&&dagen!==null&&dagen<=7) return {rang:1,reden:'zelfde bedrag',dagen:dagen};
   if(kanFooiZijn(bon.bedrag,tx.bedrag)&&fooiDatumOk(bon,tx)!==null) return {rang:1,reden:'mogelijk met fooi (+'+fmt(tx.bedrag-bon.bedrag)+')',dagen:dagen+0.5};
@@ -1291,6 +1291,7 @@ function afschriftGekozen(input){
     } else {
       var tekst=decodeerTekst(buf);
       if(/^:61:/m.test(tekst)) bron=Promise.resolve({lijst:parseMT940(tekst),soort:'MT940'});
+      else if(isAbnTab(tekst)) bron=Promise.resolve({lijst:parseAbnTab(tekst),soort:'ABN-afschrift'});
       else if(isRevolutCSV(tekst)) bron=Promise.resolve({lijst:parseRevolutCSV(tekst),soort:'Revolut-CSV',rek:'REV'});
       else bron=Promise.resolve({lijst:verrijkCSV(tekst,parseBankCSV(tekst)),soort:'CSV'});
     }
@@ -1328,6 +1329,40 @@ function verrijkCSV(tekst,lijst){
     else t.omschrijving=oms||t.omschrijving;
   });
   return lijst;
+}
+// ABN AMRO "TXT/TAB": geen kopregel, tabs ertussen, 8 kolommen:
+// rekening, valuta, datum (JJJJMMDD), beginsaldo, eindsaldo, rentedatum, bedrag (-12,34 = af), omschrijving.
+function isAbnTab(tekst){
+  var r=(tekst.split(/\r?\n/).filter(function(l){return l.trim();})[0]||'').split('\t');
+  return r.length>=8&&/^\d{8}$/.test((r[2]||'').trim())&&/^-?[\d.]+,\d{2}$/.test((r[6]||'').trim());
+}
+function schoonAbnOmschrijving(o){
+  o=(o||'').replace(/\s+/g,' ').trim();
+  // SEPA-formaat: /TRTP/.../NAME/Bol.com/REMI/bestelling 123/...
+  if(/^\/TRTP\//.test(o)){
+    var delen=o.split('/'),v={};
+    for(var i=1;i<delen.length-1;i++){var k=delen[i];if(/^(NAME|REMI|EREF|IBAN|TRTP)$/.test(k)){v[k]=delen[i+1];i++;}}
+    var naam=(v.NAME||'').trim(),rem=(v.REMI||'').trim();
+    if(naam||rem) return naam+(naam&&rem?' - ':'')+rem;
+  }
+  // SEPA met labels: "SEPA Overboeking IBAN: NL.. BIC: .. Naam: Jansen Omschrijving: huur"
+  var n=o.match(/Naam:\s*(.+?)(?:\s+(?:Omschrijving|Kenmerk|Machtiging|Incassant|IBAN|BIC):|$)/i);
+  if(n){var om=o.match(/Omschrijving:\s*(.+?)(?:\s+(?:Kenmerk|IBAN|BIC|Machtiging):|$)/i);return n[1].trim()+(om?' - '+om[1].trim():'');}
+  // Pinbetaling: "BEA, Apple Pay ALBERT HEIJN 1234,PAS123 NR:XXX, 01.04.26/12:34 AMSTERDAM"
+  var p=o.match(/^(?:BEA|GEA|eCom)[^A-Za-z0-9]*(?:Apple Pay|Google Pay|Betaalpas)?\s*(.+?),\s*PAS/i);
+  if(p) return p[1].trim();
+  return o;
+}
+function parseAbnTab(tekst){
+  var uit=[],st=Date.now();
+  tekst.split(/\r?\n/).forEach(function(l,i){
+    var c=l.split('\t');if(c.length<8) return;
+    var datum=normaliseerDatum((c[2]||'').trim());if(!datum) return;
+    var b=normaliseerBedrag(c[6]);if(!b) return;
+    uit.push({id:'tx'+(i+1)+'-'+st,datum:datum,bedrag:Math.abs(b),type:b<0?'af':'bij',
+      omschrijving:schoonAbnOmschrijving(c.slice(7).join(' ')),rekening:(c[0]||'').trim()});
+  });
+  return uit;
 }
 // Revolut (zakelijk en privé) levert een CSV met o.a. de kolommen State, Amount en Fee.
 function isRevolutCSV(tekst){
@@ -1630,7 +1665,7 @@ function renderPeriodeBalk(metRek){
 // ---------- Tab: Verwerken ----------
 function renderVerwerken(){
   var h='<div class="balk" style="margin-bottom:12px"><button class="knop" data-act="afschrift-upload">↑ Afschrift uploaden</button>'+
-    '<span class="klein">MT940 van bunq/ABN, Revolut-CSV, of de Visa-PDF van ICS</span></div>';
+    '<span class="klein">MT940 van bunq/ABN, TAB van ABN, Revolut-CSV, of de Visa-PDF van ICS</span></div>';
   h+=renderPeriodeBalk(true);
   var inP=transacties.filter(function(t){return inPeriode(t.datum)&&rekOk(t);});
   var klaar=inP.filter(isKlaar).length;
