@@ -1498,7 +1498,16 @@ function renderVerwerken(){
   });
   lijst=sorteerOpDatumDesc(lijst);
   if(!transacties.length) return h+'<div class="leeg">Nog geen bankregels. Upload een afschrift om te beginnen.</div>';
-  if(!lijst.length) return h+'<div class="leeg">'+(fWeergave==='todo'?'Alles in '+esc(periodeLabel())+' is verwerkt ✓':'Niets om te tonen.')+'</div>';
+  if(!inP.length){
+    var filterTekst=fRek!=='alle'?' van '+esc(fRek==='onbekend'?'onbekende rekening':fRek.replace(/\s*\(.*\)/,'')):'';
+    return h+'<div class="leeg">Er staan nog <b>geen bankregels</b>'+filterTekst+' in '+esc(periodeLabel())+'.<br>'+
+      (fRek!=='alle'?'Staat er een rekening geselecteerd? Kies dan <b>Alle rekeningen</b>, of ':'')+'Upload eerst het afschrift van deze periode.</div>';
+  }
+  if(!lijst.length){
+    var nPriveVerborgen=inP.filter(function(t){return txStatus(t)==='prive-std';}).length;
+    return h+'<div class="leeg">'+(fWeergave==='todo'?'Alle '+inP.length+' bankregels in '+esc(periodeLabel())+' zijn verwerkt ✓':'Niets om te tonen.')+
+      (nPriveVerborgen&&!toonPrive?'<br><span class="klein">'+nPriveVerborgen+' regel'+(nPriveVerborgen!==1?'s':'')+' van de privérekeningen staan standaard op privé (vink "privé-regels tonen" aan om ze te zien).</span>':'')+'</div>';
+  }
   var pr=onthoudenNamen(),vorige='';
   lijst.forEach(function(t){
     if(t.datum!==vorige){h+='<div class="dag">'+esc(datumTekst(t.datum))+'</div>';vorige=t.datum;}
