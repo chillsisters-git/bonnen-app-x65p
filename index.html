@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 16:51</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 17:08</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -1765,7 +1765,7 @@ function toonAfschriftCheck(rek){
     var uitleg={voor:'De eerste regel van deze rekening is van '+(c.eerste?kortDatum(c.eerste):'?')+'. Was de rekening toen nog niet in gebruik, dan is dit in orde; anders mist het afschrift van deze maand.',
       ok:'Het afschrift is er en het originele bestand is bewaard.',
       half:'Er staan regels van '+(c.min?kortDatum(c.min):'?')+' tot '+(c.max?kortDatum(c.max):'?')+'. Mist er een stuk van de maand? Upload dan dat afschrift. (Is de rekening pas later geopend of was er gewoon weinig gebruik, dan is het in orde.)',
-      oud:c.oud+' regel'+(c.oud!==1?'s zijn':' is')+' nog met de oude app ingelezen (zonder origineel voor de boekhouder, soms zonder bedrijfsnaam). Upload dit afschrift nog een keer: er komen geen dubbele regels bij.',
+      oud:c.oud+' regel'+(c.oud!==1?'s hebben':' heeft')+' nog geen origineel bestand voor de boekhouder (ingelezen met de oude app, of het opslaan lukte toen niet). Upload '+(function(){var n={};c.inM.forEach(function(t){if(!t.afsOrigineel) n[t.afschriftNaam||'het afschrift van deze maand']=true;});return Object.keys(n).map(function(x){return '"'+x+'"';}).join(' en ');})()+' nog een keer: er komen geen dubbele regels bij.',
       mist:c.leeg?'Van deze rekening is nog helemaal niets geüpload.':'Nog geen afschrift van deze maand.'+(c.eerste&&c.eerste>new Date(fJaar,m,0)?' (De eerste regel van deze rekening is van '+kortDatum(c.eerste)+'; was de rekening toen nog niet in gebruik, dan is het in orde.)':'')}[c.st];
     var bestanden={};(c.inM||[]).forEach(function(t){var n=t.afsOrigineelNaam||t.afschriftNaam;if(n) bestanden[n]=true;});
     h+='<div style="margin-top:10px"><span class="st '+S[1]+'">'+S[0]+' '+MAAND_NAMEN[m-1]+' '+fJaar+' · '+S[2]+'</span>'+
