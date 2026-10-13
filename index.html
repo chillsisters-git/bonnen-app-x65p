@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 17:08</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 18:35</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -1637,11 +1637,12 @@ function toonModal(html){$('modal').innerHTML='<div class="modal" data-act="moda
 function sluitModal(){$('modal').innerHTML='';previewSrc=null;}
 
 // ---------- Naam ----------
+var VASTE_NAMEN=['Penny','Des'];
 function vraagNaam(){
   toonModal('<div class="modal-box"><h3>Wie ben je?</h3>'+
     '<p class="klein" style="margin-bottom:10px">Bij elke bankregel komt te staan wie hem heeft afgehandeld. Je kiest dit één keer op dit apparaat.</p>'+
-    '<div class="balk"><button class="knop" data-act="naam-kies" data-naam="Penny">Penny</button></div>'+
-    '<div class="veld"><label>Of typ je naam</label><input id="naam-input" value="'+esc(gebruiker&&gebruiker!=='Penny'?gebruiker:'')+'"></div>'+
+    '<div class="balk">'+VASTE_NAMEN.map(function(n){return '<button class="knop'+(gebruiker===n?'':' licht')+'" data-act="naam-kies" data-naam="'+esc(n)+'">'+esc(n)+'</button>';}).join('')+'</div>'+
+    '<div class="veld"><label>Of typ je naam</label><input id="naam-input" value="'+esc(gebruiker&&VASTE_NAMEN.indexOf(gebruiker)<0?gebruiker:'')+'"></div>'+
     '<div class="balk" style="margin-top:12px"><button class="knop licht" data-act="naam-kies">Opslaan</button></div></div>');
 }
 
@@ -1870,6 +1871,7 @@ function renderRij(t,paren){
       '<div class="rij-l"><div class="oms" title="'+esc(t.omschrijving||'')+'">'+esc(kortOms(t.omschrijving))+'</div>';})()+
     '<div class="sub">'+esc(rekKortT(t))+' '+statusChip(t)+hint+(t.door&&S.klaar&&s!=='prive-std'?'<span>· '+esc(t.door)+'</span>':'')+'</div></div>'+
     (isPriveRek(t)&&(s==='open'||s==='twijfel')?'<button class="knopje" style="margin-left:6px;white-space:nowrap" data-act="status" data-code="prive" data-tx="'+esc(t.id)+'" title="Privé — klaar">🏠 Privé</button>':'')+
+    (s==='prive-std'?'<button class="knopje" style="margin-left:6px;white-space:nowrap" data-act="zakelijk" data-tx="'+esc(t.id)+'" title="Klopt niet: niet privé">✕ Niet privé</button>':'')+
     '<div class="bedrag '+t.type+'">'+bedragTekst(t)+'</div></div>';
   if(open) h+=renderPaneel(t,paren);
   return h;
@@ -1923,11 +1925,11 @@ function renderPaneel(t,paren){
   }
   // Privé-rekening, standaard privé
   if(s==='prive-std'){
-    h+='<h4>Privérekening</h4><p class="klein" style="margin-bottom:8px">Op deze rekening is alles standaard privé. Was dit een zakelijke uitgave?</p>';
+    h+='<h4>Privérekening</h4><p class="klein" style="margin-bottom:8px">Deze regel staat nog automatisch op privé (van een oudere versie). Klopt dat niet? Druk dan op <b>Niet privé</b>.</p>';
     var vb=t.type==='af'?voorstellenVoorTx(t,paren):[];
     vb.forEach(function(v){h+=voorstelHtml(t,v);});
     var pp=overboekingPartner(t);if(pp) h+=overboekingHtml(t,pp);
-    h+='<div class="acties">'+knop('zakelijk','💼 Is zakelijk',id)+'</div>';
+    h+='<div class="acties">'+knop('zakelijk','✕ Niet privé',id)+knop('status','✓ Klopt, privé',id+' data-code="prive"')+'</div>';
     return h+'</div>';
   }
   if(t.type==='af'){
@@ -2444,7 +2446,7 @@ document.addEventListener('click',function(e){
       });
       zetMelding('✓ '+n2+' eigen overboeking'+(n2!==1?'en':'')+' gemarkeerd.','ok');naWijziging(true,false);break;
     case 'reset': if(t){resetTx(t);naWijziging(true,false);}break;
-    case 'zakelijk': if(t){t.zakelijk=true;stempel(t);naWijziging(true,false);}break;
+    case 'zakelijk': if(t){resetTx(t);t.zakelijk=true;stempel(t);zetMelding('✓ Niet meer op privé: de regel staat nu bij Te doen.','ok');naWijziging(true,false);}break;
     case 'niet-zakelijk': if(t){delete t.zakelijk;resetTx(t);naWijziging(true,false);}break;
     case 'oms-bewerk':
       if(t){var nw=prompt('Omschrijving van deze bankregel:',t.omschrijving||'');if(nw!==null){t.omschrijving=nw.trim();stempel(t);naWijziging(true,false);}}break;
