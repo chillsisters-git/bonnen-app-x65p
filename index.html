@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 16:42</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 16:51</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -1713,6 +1713,11 @@ function afschriftCheck(rek,j,m){
   if(begin>vandaag) return null;
   var tot=eind<vandaag?eind:vandaag;
   var van=transacties.filter(function(t){return rekNaam(t)===rek;});
+  if(!van.length) return {st:'mist',inM:[],leeg:true};
+  var eersteOoit=null;van.forEach(function(t){var d=parseDatumNL(t.datum);if(d&&(!eersteOoit||d<eersteOoit)) eersteOoit=d;});
+  // Maand vóór de allereerste regel van deze rekening: rekening waarschijnlijk nog niet in gebruik.
+  if(eersteOoit&&eind<eersteOoit) return {st:'voor',inM:[],eerste:eersteOoit};
+  if(eersteOoit&&eersteOoit>begin) begin=new Date(eersteOoit.getTime()); // eerste maand: pas vanaf de eerste regel tellen
   var inM=van.filter(function(t){var d=parseDatumNL(t.datum);return d&&d>=begin&&d<=eind;});
   if(!inM.length){
     var eerste=null;van.forEach(function(t){var d=parseDatumNL(t.datum);if(d&&(!eerste||d<eerste)) eerste=d;});
@@ -1731,28 +1736,34 @@ function afschriftCheck(rek,j,m){
   var oud=inM.filter(function(t){return !t.afsOrigineel;}).length;
   return {st:oud?'oud':(dekt?'ok':'half'),inM:inM,oud:oud,max:max,min:min};
 }
-var CHECK_STIJL={ok:['✓','st-groen','in orde'],half:['◐','st-oranje','niet de hele maand'],oud:['⚠','st-oranje','opnieuw uploaden'],mist:['⚪','st-grijs','ontbreekt']};
-var CHECK_RANG={ok:0,half:1,oud:2,mist:3};
+var CHECK_STIJL={voor:['–','st-grijs','nog niet in gebruik'],ok:['✓','st-groen','in orde'],half:['◐','st-oranje','niet de hele maand'],oud:['⚠','st-oranje','opnieuw uploaden'],mist:['⚪','st-grijs','ontbreekt']};
+var CHECK_RANG={voor:-1,ok:0,half:1,oud:2,mist:3};
 function afschriftenBalk(){
   var ms=maandenInPeriode();
   var items=BEKENDE_REKENINGEN.map(function(rek){
-    var slechtste=null;
-    ms.forEach(function(m){var c=afschriftCheck(rek,fJaar,m);if(c&&(!slechtste||CHECK_RANG[c.st]>CHECK_RANG[slechtste.st])) slechtste=c;});
-    return slechtste?{rek:rek,c:slechtste}:null;
+    var slechtste=null,per=[];
+    ms.forEach(function(m){var c=afschriftCheck(rek,fJaar,m);if(!c) return;per.push([m,c]);if(!slechtste||CHECK_RANG[c.st]>CHECK_RANG[slechtste.st]) slechtste=c;});
+    if(!slechtste||slechtste.st==='voor') return null; // hele periode vóór de rekening bestond
+    return {rek:rek,c:slechtste,per:per};
   }).filter(Boolean);
   if(!items.length) return '';
   var allesOk=items.every(function(x){return x.c.st==='ok';});
   return '<div class="kaart" style="padding:10px 12px"><div class="klein" style="margin-bottom:6px">Afschriften '+esc(periodeLabel())+(allesOk?' — alles compleet ✓':' — tik voor details')+'</div><div class="balk" style="margin:0">'+
     items.map(function(x){var S=CHECK_STIJL[x.c.st];
-      return '<button class="st '+S[1]+'" style="border:none;cursor:pointer;font-size:12px;padding:4px 9px" data-act="afs-check" data-rek="'+esc(x.rek)+'" title="'+esc(S[2])+'">'+S[0]+' '+esc(x.rek.replace(/\s*\(.*\)/,''))+(x.c.st!=='ok'?' · '+S[2]:'')+'</button>';}).join('')+'</div></div>';
+      var naam=esc(x.rek.replace(/\s*\(.*\)/,''));
+      var tekst=x.per.length>1?naam+' · '+x.per.filter(function(p){return p[1].st!=='voor';}).map(function(p){return MAAND_NAMEN[p[0]-1]+' '+CHECK_STIJL[p[1].st][0];}).join(' '):
+        S[0]+' '+naam+(x.c.st!=='ok'?' · '+(x.c.leeg?'nog niets geüpload':S[2]):'');
+      return '<button class="st '+S[1]+'" style="border:none;cursor:pointer;font-size:12px;padding:4px 9px" data-act="afs-check" data-rek="'+esc(x.rek)+'" title="'+esc(S[2])+'">'+tekst+'</button>';}).join('')+'</div>'+
+    (items.some(function(x){return x.c.st!=='ok';})?'<div class="klein" style="margin-top:6px">✓ in orde · ◐ niet de hele maand · ⚠ opnieuw uploaden · ⚪ ontbreekt</div>':'')+'</div>';
 }
 function toonAfschriftCheck(rek){
   var ms=maandenInPeriode(),h='<div class="modal-box"><h3>'+esc(rek.replace(/\s*\(.*\)/,''))+' · '+esc(periodeLabel())+'</h3>';
   var nodig=false;
   ms.forEach(function(m){
     var c=afschriftCheck(rek,fJaar,m);if(!c) return;
-    var S=CHECK_STIJL[c.st];if(c.st!=='ok') nodig=true;
-    var uitleg={ok:'Het afschrift is er en het originele bestand is bewaard.',
+    var S=CHECK_STIJL[c.st];if(c.st!=='ok'&&c.st!=='voor') nodig=true;
+    var uitleg={voor:'De eerste regel van deze rekening is van '+(c.eerste?kortDatum(c.eerste):'?')+'. Was de rekening toen nog niet in gebruik, dan is dit in orde; anders mist het afschrift van deze maand.',
+      ok:'Het afschrift is er en het originele bestand is bewaard.',
       half:'Er staan regels van '+(c.min?kortDatum(c.min):'?')+' tot '+(c.max?kortDatum(c.max):'?')+'. Mist er een stuk van de maand? Upload dan dat afschrift. (Is de rekening pas later geopend of was er gewoon weinig gebruik, dan is het in orde.)',
       oud:c.oud+' regel'+(c.oud!==1?'s zijn':' is')+' nog met de oude app ingelezen (zonder origineel voor de boekhouder, soms zonder bedrijfsnaam). Upload dit afschrift nog een keer: er komen geen dubbele regels bij.',
       mist:c.leeg?'Van deze rekening is nog helemaal niets geüpload.':'Nog geen afschrift van deze maand.'+(c.eerste&&c.eerste>new Date(fJaar,m,0)?' (De eerste regel van deze rekening is van '+kortDatum(c.eerste)+'; was de rekening toen nog niet in gebruik, dan is het in orde.)':'')}[c.st];
