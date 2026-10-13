@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 10:46</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 11:00</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -804,7 +804,7 @@ function txStatus(t){
   if(t.status&&STATUS[t.status]) return t.status;
   if(handmatigTxGematcht[t.id]) return 'geenbon'; // oude app: "✅ handmatig gematcht"
   if(twijfelgevallen[t.id]) return 'twijfel';
-  if(isPriveRek(t)&&!t.zakelijk) return 'prive-std';
+  // Privérekeningen worden NIET meer automatisch op privé gezet: er staan veel zakelijke uitgaven tussen.
   return 'open';
 }
 function isKlaar(t){return STATUS[txStatus(t)].klaar;}
@@ -1610,7 +1610,7 @@ function renderVerwerken(){
   // Weergave
   var weergaven=[['todo','Te doen',inP.filter(function(t){return !isKlaar(t)&&txStatus(t)!=='opvragen';}).length],['opvragen','Opgevraagd',nOpv],['klaar','Klaar',klaar],['alles','Alles',inP.length]];
   h+='<div class="balk">'+weergaven.map(function(w){return '<button class="knopje'+(fWeergave===w[0]?' actief':'')+'" data-act="weergave" data-w="'+w[0]+'">'+w[1]+' ('+w[2]+')</button>';}).join('')+
-    '<label class="klein" style="display:flex;gap:5px;align-items:center;margin-left:6px;cursor:pointer"><input type="checkbox" style="width:auto" data-act="toon-prive"'+(toonPrive?' checked':'')+'> privé-regels tonen</label></div>';
+    (nPrive?'<label class="klein" style="display:flex;gap:5px;align-items:center;margin-left:6px;cursor:pointer"><input type="checkbox" style="width:auto" data-act="toon-prive"'+(toonPrive?' checked':'')+'> privé-regels tonen</label>':'')+'</div>';
   var lijst=inP.filter(function(t){
     var s=txStatus(t),k=STATUS[s].klaar;
     if(s==='prive-std'&&!toonPrive) return false;
@@ -1656,6 +1656,7 @@ function renderRij(t,paren){
       '<div class="rij-l"><div class="oms">'+esc(hk.naam)+' <span class="klein">· '+esc(t.omschrijving)+'</span></div>':
       '<div class="rij-l"><div class="oms">'+esc(t.omschrijving||'—')+'</div>';})()+
     '<div class="sub">'+esc(rekKortT(t))+' '+statusChip(t)+hint+(t.door&&S.klaar&&s!=='prive-std'?'<span>· '+esc(t.door)+'</span>':'')+'</div></div>'+
+    (isPriveRek(t)&&(s==='open'||s==='twijfel')?'<button class="knopje" style="margin-left:6px;white-space:nowrap" data-act="status" data-code="prive" data-tx="'+esc(t.id)+'" title="Privé — klaar">🏠 Privé</button>':'')+
     '<div class="bedrag '+t.type+'">'+bedragTekst(t)+'</div></div>';
   if(open) h+=renderPaneel(t,paren);
   return h;
@@ -1883,7 +1884,7 @@ function renderKwartaal(){
   // Pakketje
   h+='<div class="dag">Voor de boekhouder</div><div class="kaart">'+
     '<p class="klein" style="margin-bottom:8px">Eén ZIP met een Excel-overzicht van alle bankregels (met een link naar de bon), de bonfoto\'s en de originele afschriften (MT940 / Visa-PDF).</p>'+
-    '<label class="klein" style="display:flex;gap:6px;align-items:center;margin-bottom:10px;cursor:pointer"><input type="checkbox" style="width:auto" data-act="pk-prive"'+(pkPrive?' checked':'')+'> privé-regels meenemen</label>'+
+    '<label class="klein" style="display:flex;gap:6px;align-items:center;margin-bottom:10px;cursor:pointer"><input type="checkbox" style="width:auto" data-act="pk-prive"'+(pkPrive?' checked':'')+'> regels die op privé staan meenemen</label>'+
     '<div class="balk"><button class="knop" id="pk-knop" data-act="pakketje">📦 Pakketje '+esc(periodeLabel())+'</button>'+
     '<button class="knop licht" id="pk-excel" data-act="alleen-excel">📊 Alleen Excel</button></div>'+
     '<div class="klein" id="pk-voortgang" style="margin-top:6px"></div></div>';
@@ -1950,7 +1951,7 @@ function maakPakketje(metZip){
   var knopEl=$(metZip?'pk-knop':'pk-excel'),vg=$('pk-voortgang');
   if(knopEl) knopEl.disabled=true;
   var zet=function(t){if(vg) vg.textContent=t;};
-  var txs=transacties.filter(function(t){return inPeriode(t.datum)&&(pkPrive||txStatus(t)!=='prive-std');})
+  var txs=transacties.filter(function(t){return inPeriode(t.datum)&&(pkPrive||!(isPriveRek(t)&&(txStatus(t)==='prive'||txStatus(t)==='prive-std')));})
     .sort(function(a,b){return (parseDatumNL(a.datum)||0)-(parseDatumNL(b.datum)||0);});
   var bonIds={};
   txs.forEach(function(t){var b=matchesByTxId[t.id];if(b!=null&&bonMap[b]) bonIds[b]=true;if(t.terugBon&&bonMap[t.terugBon]) bonIds[t.terugBon]=true;});
