@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 16:00</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 16:27</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -850,12 +850,38 @@ function rekOk(t){
   if(fRek==='onbekend') return !r;
   return r===fRek;
 }
+function isTodo(t){return !isKlaar(t)&&txStatus(t)!=='opvragen';}
 function kiesStandaardPeriode(){
-  // Het kwartaal van de nieuwste bankregel; zonder bankregels het huidige kwartaal.
-  var laatste=null;
-  transacties.forEach(function(t){var d=parseDatumNL(t.datum);if(d&&(!laatste||d>laatste)) laatste=d;});
-  var d=laatste||new Date();
-  fJaar=d.getFullYear();fKwartaal=Math.ceil((d.getMonth()+1)/3);fMaand='alle';
+  // De oudste maand waarin nog iets te doen is; is alles klaar, dan de maand van de nieuwste bankregel.
+  var oudste=null,laatste=null;
+  transacties.forEach(function(t){var d=parseDatumNL(t.datum);if(!d) return;
+    if(!laatste||d>laatste) laatste=d;
+    if(isTodo(t)&&(!oudste||d<oudste)) oudste=d;});
+  var d=oudste||laatste||new Date();
+  zetMaand(d.getFullYear(),d.getMonth()+1);
+}
+function zetMaand(j,m){fJaar=j;fKwartaal=Math.ceil(m/3);fMaand=m;}
+// Telling per maand (voor de maandknoppen): hoeveel nog te doen, en zijn er nieuwe voorstellen?
+function maandStand(j,m,paren){
+  var todo=0,n=0,tip=false;
+  transacties.forEach(function(t){
+    var d=parseDatumNL(t.datum);if(!d||d.getFullYear()!==j||d.getMonth()+1!==m||!rekOk(t)) return;
+    n++;if(isTodo(t)) todo++;
+    if(!tip&&!isKlaar(t)&&t.type==='af'&&voorstellenVoorTx(t,paren).length) tip=true;
+  });
+  return {n:n,todo:todo,tip:tip};
+}
+// Volgende maand met nog iets te doen (anders gewoon de maand erna).
+function volgendeMaand(){
+  if(fMaand==='alle') return null;
+  var nu=fJaar*12+fMaand,beste=null;
+  transacties.forEach(function(t){
+    if(!isTodo(t)||!rekOk(t)) return;
+    var d=parseDatumNL(t.datum);if(!d) return;var k=d.getFullYear()*12+d.getMonth()+1;
+    if(k>nu&&(beste===null||k<beste)) beste=k;
+  });
+  if(beste===null) beste=nu+1;
+  return {j:Math.floor((beste-1)/12),m:(beste-1)%12+1};
 }
 function beschikbareJaren(){
   var j={};j[new Date().getFullYear()]=true;
@@ -1654,7 +1680,11 @@ function renderPeriodeBalk(metRek){
   h+='</div>';
   if(fKwartaal){
     h+='<div class="balk">';
-    [fKwartaal*3-2,fKwartaal*3-1,fKwartaal*3].forEach(function(m){h+='<button class="knopje'+(fMaand===m?' actief':'')+'" data-act="maand" data-m="'+m+'">'+MAAND_NAMEN[m-1]+'</button>';});
+    var prM=onthoudenNamen();
+    [fKwartaal*3-2,fKwartaal*3-1,fKwartaal*3].forEach(function(m){
+      var st=maandStand(fJaar,m,prM);
+      var extra=!st.n?'':(st.todo?' <span style="opacity:.7">· '+st.todo+'</span>':' ✓')+(st.tip?' 💡':'');
+      h+='<button class="knopje'+(fMaand===m?' actief':'')+'" data-act="maand" data-m="'+m+'" title="'+(st.n?st.todo+' nog te doen'+(st.tip?' · er zijn voorstellen':''):'geen bankregels')+'">'+MAAND_NAMEN[m-1]+extra+'</button>';});
     h+='</div>';
   }
   if(metRek){
@@ -1707,15 +1737,38 @@ function renderVerwerken(){
   }
   if(!lijst.length){
     var nPriveVerborgen=inP.filter(function(t){return txStatus(t)==='prive-std';}).length;
-    return h+'<div class="leeg">'+(fWeergave==='todo'?'Alle '+inP.length+' bankregels in '+esc(periodeLabel())+' zijn verwerkt ✓':'Niets om te tonen.')+
+    return h+'<div class="leeg">'+(fWeergave==='todo'?'✓ Alle '+inP.length+' bankregels in '+esc(periodeLabel())+' zijn verwerkt'+(nOpv?' (op '+nOpv+' opgevraagde bon'+(nOpv!==1?'nen':'')+' na)':'')+'.':'Niets om te tonen.')+
+      (fWeergave==='todo'?volgendeMaandKnop():'')+
       (nPriveVerborgen&&!toonPrive?'<br><span class="klein">'+nPriveVerborgen+' regel'+(nPriveVerborgen!==1?'s':'')+' van de privérekeningen staan standaard op privé (vink "privé-regels tonen" aan om ze te zien).</span>':'')+'</div>';
   }
   var pr=onthoudenNamen(),vorige='';
-  lijst.forEach(function(t){
-    if(t.datum!==vorige){h+='<div class="dag">'+esc(datumTekst(t.datum))+'</div>';vorige=t.datum;}
-    h+=renderRij(t,pr);
-  });
-  return h;
+  if(fWeergave==='todo'){
+    // In blokjes: eerst wat snel gaat, de lastige regels als laatste.
+    var groepen=[['snel','💡 Snel te koppelen','De app heeft een bon gevonden: even kijken en op Koppel drukken.',[]],
+      ['over','🔁 Eigen overboekingen','Geld van de ene eigen rekening naar de andere.',[]],
+      ['bij','➕ Bijschrijvingen','Geld dat binnenkwam: betaalde facturen, terugbetalingen, stortingen.',[]],
+      ['rest','📋 Zonder voorstel','Bon uploaden, opvragen, privé of geen bon nodig.',[]]];
+    lijst.forEach(function(t){
+      var g=(t.type==='af'&&voorstellenVoorTx(t,pr).length)?0:(overboekingPartner(t)?1:(t.type==='bij'?2:3));
+      groepen[g][3].push(t);
+    });
+    groepen.forEach(function(g){
+      if(!g[3].length) return;
+      h+='<div class="dag" style="margin-top:18px;font-size:13px;color:var(--tekst)">'+g[1]+' ('+g[3].length+')</div><div class="klein" style="margin:-2px 2px 6px">'+g[2]+'</div>';
+      g[3].forEach(function(t){h+=renderRij(t,pr);});
+    });
+  } else {
+    lijst.forEach(function(t){
+      if(t.datum!==vorige){h+='<div class="dag">'+esc(datumTekst(t.datum))+'</div>';vorige=t.datum;}
+      h+=renderRij(t,pr);
+    });
+  }
+  return h+volgendeMaandKnop();
+}
+function volgendeMaandKnop(){
+  var v=volgendeMaand();
+  if(!v) return '';
+  return '<div style="text-align:center;margin-top:16px"><button class="knop licht" data-act="naar-maand" data-j="'+v.j+'" data-m="'+v.m+'">Volgende maand: '+MAAND_NAMEN[v.m-1]+' '+v.j+' →</button></div>';
 }
 function statusChip(t){
   var s=txStatus(t),S=STATUS[s];
@@ -2226,6 +2279,7 @@ document.addEventListener('click',function(e){
     case 'melding-weg': melding=null;render();break;
     case 'kwartaal': var k=+el.getAttribute('data-k');fKwartaal=k||null;fMaand='alle';openTxId=null;render();break;
     case 'maand': var m=+el.getAttribute('data-m');fMaand=(fMaand===m?'alle':m);openTxId=null;render();break;
+    case 'naar-maand': zetMaand(+el.getAttribute('data-j'),+el.getAttribute('data-m'));fWeergave='todo';openTxId=null;render();window.scrollTo(0,0);break;
     case 'rek': fRek=el.getAttribute('data-rek');openTxId=null;render();break;
     case 'weergave': fWeergave=el.getAttribute('data-w');openTxId=null;render();break;
     case 'toon-prive': toonPrive=el.checked;render();break;
