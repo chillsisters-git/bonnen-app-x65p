@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 15:02</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 15:44</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -1449,7 +1449,7 @@ function importeer(gevonden,naam,soort,dataUrl){
   var zonderRek=r.nieuw.filter(function(t){return !matchRekening(t.rekening);}).length;
   zetMelding('✓ '+soort+' "'+naam+'": '+r.nieuw.length+' nieuwe regel'+(r.nieuw.length!==1?'s':'')+
     (r.bestaand.length?', '+r.bestaand.length+' stond'+(r.bestaand.length!==1?'en':'')+' er al in':'')+
-    (aangevuld?' ('+aangevuld+' daarvan kreeg'+(aangevuld!==1?'en':'')+' een betere omschrijving)':'')+'.'+
+    (aangevuld?' ('+aangevuld+' daarvan '+(aangevuld!==1?'kregen':'kreeg')+' een betere omschrijving)':'')+'.'+
     (zonderRek?' Let op: '+zonderRek+' regel'+(zonderRek!==1?'s hebben':' heeft')+' een onbekend rekeningnummer.':'')+
     ' Origineel wordt bewaard voor de boekhouder…','ok');
   // Naar de periode van dit afschrift springen.
@@ -1727,20 +1727,38 @@ function renderRij(t,paren){
   if(t.vraag) hint+='<span class="st st-blauw">❓ vraag</span>';
   var h='<div class="rij k-'+S.kleur+(open?' open':'')+'" data-act="open" data-tx="'+esc(t.id)+'">'+
     (function(){var hk=herkend(t);return hk?
-      '<div class="rij-l"><div class="oms">'+esc(hk.naam)+' <span class="klein">· '+esc(t.omschrijving)+'</span></div>':
-      '<div class="rij-l"><div class="oms">'+esc(t.omschrijving||'—')+'</div>';})()+
+      '<div class="rij-l"><div class="oms">'+esc(hk.naam)+' <span class="klein">· '+esc(kortOms(t.omschrijving))+'</span></div>':
+      '<div class="rij-l"><div class="oms" title="'+esc(t.omschrijving||'')+'">'+esc(kortOms(t.omschrijving))+'</div>';})()+
     '<div class="sub">'+esc(rekKortT(t))+' '+statusChip(t)+hint+(t.door&&S.klaar&&s!=='prive-std'?'<span>· '+esc(t.door)+'</span>':'')+'</div></div>'+
     (isPriveRek(t)&&(s==='open'||s==='twijfel')?'<button class="knopje" style="margin-left:6px;white-space:nowrap" data-act="status" data-code="prive" data-tx="'+esc(t.id)+'" title="Privé — klaar">🏠 Privé</button>':'')+
     '<div class="bedrag '+t.type+'">'+bedragTekst(t)+'</div></div>';
   if(open) h+=renderPaneel(t,paren);
   return h;
 }
+// Lange codes en kenmerken (betaalreferenties, klantnummers) weglaten in de lijst; ze blijven
+// wel bewaard en staan voluit in het uitgeklapte paneel en in de export voor de boekhouder.
+function kortOms(o){
+  o=(o||'').replace(/"/g,'').replace(/\s+/g,' ').trim();
+  if(!o) return '—';
+  // Alleen echte betaalcodes weglaten; factuur-, polis- en klantnummers blijven staan.
+  function isCode(w){
+    w=w.replace(/[,;|]+$/,'');
+    if(/^trnsnr:\d+$/i.test(w)) return true;
+    if(/^\d{10,}$/.test(w)) return true;                                   // 7180025400040147
+    if(/^[a-f0-9]{16,}$/i.test(w)) return true;                              // 1874be6947d7…
+    if(w.length>=12&&/\d/.test(w)&&/[A-Z]/.test(w)&&/^[A-Z0-9]+$/.test(w)) return true; // C97LQZGHR8RFZHP92GKII
+    return false;
+  }
+  var k=o.split(' ').filter(function(w){return !isCode(w);}).join(' ')
+    .replace(/\s*\|\s*$/,'').replace(/\s+-\s*$/,'').replace(/^\s*-\s+/,'').replace(/\s+/g,' ').trim();
+  return (k.replace(/[^A-Za-zÀ-ÿ]/g,'').length>=3)?k:o;   // niets leesbaars over: dan toch de hele tekst
+}
 function knop(act,tekst,attrs){return '<button class="knopje" data-act="'+act+'"'+(attrs||'')+'>'+tekst+'</button>';}
 function renderPaneel(t,paren){
   var s=txStatus(t),S=STATUS[s],id=' data-tx="'+esc(t.id)+'"';
   var h='<div class="paneel">';
   h+='<div class="klein" style="margin-top:8px">'+esc(t.datum)+' · '+esc(rekKortT(t))+(t.afschriftNaam?' · uit '+esc(t.afschriftNaam):'')+
-    '</div>';
+    '</div>'+(kortOms(t.omschrijving)!==(t.omschrijving||'').replace(/"/g,'').replace(/\s+/g,' ').trim()?'<div class="klein" style="margin-top:4px;word-break:break-all">Volledig op de bank: '+esc(t.omschrijving)+'</div>':'');
   var hk=herkend(t);
   h+='<div class="klein" style="margin-top:4px">'+(hk?'Herkend als <b>'+esc(hk.naam)+'</b>'+(hk.cat?' · '+esc(hk.cat):'')+(hk.bron==='app'?' (door de app)':'')+' · ':'')+
     '<a href="#" data-act="alias"'+id+'>'+(hk?'✏️ andere naam':'🏷 geef herkenbare naam')+'</a> · '+
@@ -1856,7 +1874,7 @@ function renderBakje(){
       '<div class="sub">'+esc(b.datum)+' · '+esc((b.betaald||'').replace(/\s*\(.*\)/,''))+(b.toegevoegdDoor?' · door '+esc(b.toegevoegdDoor):'')+' '+stat+'</div>'+
       (b.vraag?vraagBlok(b.vraag,b,' data-bon="'+b.id+'"'):'');
     vs.forEach(function(v){
-      h+='<div class="voorstel" style="margin-top:8px"><div><div class="rede">💡 '+esc(v.reden)+'</div><div class="klein">🏦 '+esc(v.tx.datum)+' · '+esc(v.tx.omschrijving||'—')+' · '+fmt(v.tx.bedrag)+' · '+esc(rekKortT(v.tx))+'</div></div>'+
+      h+='<div class="voorstel" style="margin-top:8px"><div><div class="rede">💡 '+esc(v.reden)+'</div><div class="klein">🏦 '+esc(v.tx.datum)+' · '+esc(kortOms(v.tx.omschrijving))+' · '+fmt(v.tx.bedrag)+' · '+esc(rekKortT(v.tx))+'</div></div>'+
         '<div class="acties"><button class="knopje" data-act="geen-match" data-tx="'+esc(v.tx.id)+'" data-bon="'+b.id+'">✕ Geen match</button>'+
         '<button class="knop" style="padding:7px 11px" data-act="koppel" data-tx="'+esc(v.tx.id)+'" data-bon="'+b.id+'">Koppel</button></div></div>';
     });
