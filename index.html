@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 10:17</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 10:25</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -863,6 +863,82 @@ function beschikbareJaren(){
   return Object.keys(j).map(Number).sort();
 }
 
+// ---------- Herkenbare namen ----------
+// Op de bank staat vaak de officiële naam (bijv. "Île-de-France Mobilités"), op de bon iets
+// anders ("Metro Parijs"). De app herkent bekende namen zelf, en je kunt elke naam één keer
+// een eigen naam + standaardcategorie geven. Die eigen naam wordt bewaard op alle bankregels
+// met dezelfde naam (veld alias / aliasCat) en geldt ook voor latere afschriften.
+var BEKENDE_NAMEN=[
+  [/ile[- ]de[- ]france mobilit|\bratp\b|navigo/,'Metro/OV Parijs','Reiskosten OV'],
+  [/\bsncf\b|ouigo|\btgv\b/,'Trein Frankrijk (SNCF)','Reiskosten OV'],
+  [/eurostar/,'Trein Eurostar','Reis- en verblijfkosten'],
+  [/\bns\b.*(reizigers|groep|internation)|^ns\b|ns-?ticket/,'Trein NS','Reiskosten OV'],
+  [/\bgvb\b|\bret\b rotterdam|\bhtm\b|arriva|\bconnexxion|translink|ov-?chip/,'Openbaar vervoer NL','Reiskosten OV'],
+  [/\bsanef\b|\baprr\b|vinci autoroute|autoroutes|\basf\b|peage|péage|\bemovis|telepeage|bip&go/,'Tol (Frankrijk)','Autokosten'],
+  [/^dott\b|\bdott\b|\blime\b|^voi\b|\bvoi\b|\btier\b|\bbird\b|felyx|check technolog|go sharing/,'Deelstep/-scooter','Reis- en verblijfkosten'],
+  [/\bbounce\b|nannybag|radical storage|lockers?\b/,'Bagage-opslag','Reis- en verblijfkosten'],
+  [/\buber\b|\bbolt\b|free ?now|\bg7\b|\btaxi\b|heetch/,'Taxi','Reis- en verblijfkosten'],
+  [/2theloo/,'Toilet (2theloo)','Reis- en verblijfkosten'],
+  [/q[ -]?park|easypark|yellowbrick|parkmobile|\bindigo\b|interparking|parkeer|parking|parkeren/,'Parkeren','Autokosten'],
+  [/\bshell\b|\besso\b|\bbp\b|totalenergies|\btotal\b|\btango\b|\btinq\b|texaco|avia\b|gulf\b|argos\b|makro tank/,'Tankstation','Brandstof'],
+  [/booking\.?com|airbnb|kimpton|holiday inn|hotel|ibis\b|novotel|mercure|accor|hostel/,'Hotel/verblijf','Reis- en verblijfkosten'],
+  [/transavia|\bklm\b|vueling|ryanair|easyjet|korean air|air france|lufthansa|iberia|wizz/,'Vliegticket','Reis- en verblijfkosten'],
+  [/albert heijn|\bah to go\b|^ah\b|\bjumbo\b|\bvomar\b|\blidl\b|\baldi\b|\bdirk\b|\bplus\b|carrefour|monoprix|franprix|intermarch/,'Supermarkt',''],
+  [/\bgamma\b|hornbach|praxis|karwei|leroy merlin|bauhaus|\bhubo\b|castorama|brico/,'Bouwmarkt','Algemene kosten'],
+  [/bol\.com|coolblue|amazon|mediamarkt|\bfnac\b/,'Webwinkel/elektronica','Algemene kosten'],
+  [/\bkpn\b|vodafone|t-mobile|\bodido\b|ziggo|\bsfr\b|orange\b|bouygues|\bfree mobile|simyo|lebara/,'Telefoon/internet','Telefoon en internet'],
+  [/google|apple\.com|itunes|icloud|microsoft|adobe|canva|openai|anthropic|dropbox|spotify|netflix/,'Software/abonnement','Automatiseringkosten'],
+  [/copystop|kopie|copy\b|printshop|drukkerij/,'Kopieer-/printwinkel','Drukwerk, porti en vrachten'],
+  [/postnl|\bdhl\b|\bups\b|\bdpd\b|\bgls\b|la poste|fedex/,'Verzending/post','Drukwerk, porti en vrachten'],
+  [/premium-plan|revolut.*(kosten|fee|plan)|bunq.*(abonnement|kosten)|\bkosten\b.*plan|rente en kosten/,'Bankkosten','Bankkosten'],
+  [/belastingdienst/,'Belastingdienst','']
+];
+function zonderAccenten(x){return (x||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();}
+var _aliasCache=null,_aliasVersie=-1;
+function eigenNamen(){
+  if(_aliasCache&&_aliasVersie===versieTeller+':'+transacties.length) return _aliasCache;
+  var m={};
+  transacties.forEach(function(t){if(t.alias){var k=naamSleutel(t.omschrijving);if(k) m[k]={naam:t.alias,cat:t.aliasCat||''};}});
+  _aliasCache=m;_aliasVersie=versieTeller+':'+transacties.length;return m;
+}
+// Geeft {naam, cat, bron:'eigen'|'app'} of null.
+function herkend(t){
+  if(!t||!t.omschrijving) return null;
+  var e=eigenNamen()[naamSleutel(t.omschrijving)];
+  if(e) return {naam:e.naam,cat:e.cat,bron:'eigen'};
+  var o=zonderAccenten(t.omschrijving.replace(BETAALDIENST_PREFIX,''));
+  for(var i=0;i<BEKENDE_NAMEN.length;i++){
+    if(BEKENDE_NAMEN[i][0].test(o)) return {naam:BEKENDE_NAMEN[i][1],cat:BEKENDE_NAMEN[i][2],bron:'app'};
+  }
+  return null;
+}
+function zoekLink(t){
+  var q=(t.omschrijving||'').replace(BETAALDIENST_PREFIX,'').split(' - ')[0].replace(/[0-9]{5,}/g,'').trim();
+  return 'https://www.google.com/search?q='+encodeURIComponent(q);
+}
+function vraagEigenNaam(t){
+  var h=herkend(t);
+  var k=naamSleutel(t.omschrijving);
+  var zelfde=transacties.filter(function(x){return naamSleutel(x.omschrijving)===k;});
+  toonModal('<div class="modal-box"><h3>Herkenbare naam</h3>'+
+    '<p class="klein" style="margin-bottom:8px">Op de bank: <b>'+esc(t.omschrijving)+'</b><br>Geldt voor alle '+zelfde.length+' bankregel'+(zelfde.length!==1?'s':'')+' met deze naam, ook in latere afschriften.</p>'+
+    '<div class="veld"><label>Wat is het eigenlijk?</label><input id="alias-naam" placeholder="bijv. Metro Parijs" value="'+esc(h?h.naam:'')+'"></div>'+
+    '<div class="veld"><label>Standaard categorie (optioneel)</label><select id="alias-cat"><option value="">— geen —</option>'+
+      CATEGORIEEN.map(function(c){return '<option'+(h&&h.cat===c?' selected':'')+'>'+esc(c)+'</option>';}).join('')+'</select></div>'+
+    '<div class="balk" style="margin-top:14px"><button class="knop" data-act="alias-opslaan" data-tx="'+esc(t.id)+'">Opslaan</button>'+
+    (h&&h.bron==='eigen'?'<button class="knopje" data-act="alias-weg" data-tx="'+esc(t.id)+'">Eigen naam wissen</button>':'')+
+    '<button class="knop licht" data-act="modal-dicht">Annuleren</button></div></div>');
+}
+function zetEigenNaam(t,naam,cat){
+  var k=naamSleutel(t.omschrijving);
+  transacties.forEach(function(x){
+    if(naamSleutel(x.omschrijving)!==k) return;
+    if(naam){x.alias=naam;x.aliasCat=cat||'';} else {delete x.alias;delete x.aliasCat;}
+    stempel(x);
+  });
+  naWijziging(true,false);
+}
+
 // ---------- Voorstellen ----------
 // Bonnen met een onbekende betaalwijze (bijv. "Anders: …4016", een kaartnummer dat de app
 // nog niet kende) mogen bij elke rekening als voorstel verschijnen. Deze versie vervangt
@@ -876,6 +952,7 @@ function bankKlopt(bon,tx){
 function onbekendeBetaalwijze(b){return BEKENDE_REKENINGEN.indexOf(b.betaald)<0&&!isContant(b);}
 function voorstellenVoorTx(t,paren){
   paren=paren||onthoudenNamen();
+  var hk=herkend(t);
   var uit=[];
   var twijfel=twijfelgevallen[t.id]||[];
   bonnen.forEach(function(b){
@@ -884,6 +961,7 @@ function voorstellenVoorTx(t,paren){
     if((genegeerd[t.id]||[]).indexOf(b.id)>=0) return; // weggedrukt met "Geen match"
     if(twijfel.indexOf(b.id)>=0){uit.push({bon:b,rang:-1,reden:'zelfde bedrag en datum',dagen:0});return;}
     var v=voorstelVoor(b,t,paren,false);
+    if(!v&&hk){var t2=Object.assign({},t,{omschrijving:hk.naam});v=voorstelVoor(b,t2,paren,false);}
     if(v) uit.push({bon:b,rang:v.rang,reden:v.reden,dagen:v.dagen==null?99:v.dagen});
   });
   uit.sort(function(a,b){return (a.rang-b.rang)||(a.dagen-b.dagen);});
@@ -1328,7 +1406,8 @@ function scanBestand(file,ctx){
 function bonVanTx(txId){
   var t=txMap[txId];if(!t) return;
   previewSrc=null;bonFormCtx={txId:txId};
-  toonBonForm({datum:t.datum,omschrijving:t.omschrijving||'',bedrag:t.bedrag,btw:0,categorie:'Algemene kosten',
+  var hk=herkend(t);
+  toonBonForm({datum:t.datum,omschrijving:hk?hk.naam+' ('+(t.omschrijving||'')+')':(t.omschrijving||''),bedrag:t.bedrag,btw:0,categorie:(hk&&hk.cat)||'Algemene kosten',
     betaald:rekNaam(t)||'BUNQ Zakelijk (7361)',type:'Zakelijk',opmerking:'Gemaakt vanuit bankregel'},'',null);
 }
 function bewerkBon(bonId){
@@ -1547,7 +1626,9 @@ function renderRij(t,paren){
   if(t.type==='af'&&(s==='open'||s==='opvragen')&&voorstellenVoorTx(t,paren).length) hint='<span class="st st-oranje">💡 voorstel</span>';
   if((s==='open'||s==='prive-std')&&overboekingPartner(t)) hint+='<span class="st st-blauw">🔁 overboeking?</span>';
   var h='<div class="rij k-'+S.kleur+(open?' open':'')+'" data-act="open" data-tx="'+esc(t.id)+'">'+
-    '<div class="rij-l"><div class="oms">'+esc(t.omschrijving||'—')+'</div>'+
+    (function(){var hk=herkend(t);return hk?
+      '<div class="rij-l"><div class="oms">'+esc(hk.naam)+' <span class="klein">· '+esc(t.omschrijving)+'</span></div>':
+      '<div class="rij-l"><div class="oms">'+esc(t.omschrijving||'—')+'</div>';})()+
     '<div class="sub">'+esc(rekKortT(t))+' '+statusChip(t)+hint+(t.door&&S.klaar&&s!=='prive-std'?'<span>· '+esc(t.door)+'</span>':'')+'</div></div>'+
     '<div class="bedrag '+t.type+'">'+bedragTekst(t)+'</div></div>';
   if(open) h+=renderPaneel(t,paren);
@@ -1558,7 +1639,11 @@ function renderPaneel(t,paren){
   var s=txStatus(t),S=STATUS[s],id=' data-tx="'+esc(t.id)+'"';
   var h='<div class="paneel">';
   h+='<div class="klein" style="margin-top:8px">'+esc(t.datum)+' · '+esc(rekKortT(t))+(t.afschriftNaam?' · uit '+esc(t.afschriftNaam):'')+
-    ' · <a href="#" data-act="oms-bewerk"'+id+'>omschrijving aanpassen</a></div>';
+    '</div>';
+  var hk=herkend(t);
+  h+='<div class="klein" style="margin-top:4px">'+(hk?'Herkend als <b>'+esc(hk.naam)+'</b>'+(hk.cat?' · '+esc(hk.cat):'')+(hk.bron==='app'?' (door de app)':'')+' · ':'')+
+    '<a href="#" data-act="alias"'+id+'>'+(hk?'✏️ andere naam':'🏷 geef herkenbare naam')+'</a> · '+
+    '<a href="'+esc(zoekLink(t))+'" target="_blank" rel="noopener">🔎 opzoeken</a></div>';
   // Al afgehandeld
   if(S.klaar&&s!=='prive-std'){
     h+='<h4>Afgehandeld</h4>';
@@ -1915,10 +2000,10 @@ function maakWerkboek(XLSX,txs,losse,bestanden){
     var l=link(b),fooi=b&&s==='bon'?fooiBedrag(b):0;
     var enkel=b&&!b.herhalend&&gekoppeldeTransacties(b.id).length<=1;
     return {link:l&&l.url,waarden:[
-      parseDatumNL(t.datum)||t.datum,rekKortT(t),t.omschrijving||'',
+      parseDatumNL(t.datum)||t.datum,rekKortT(t),(herkend(t)?herkend(t).naam+' — ':'')+(t.omschrijving||''),
       t.type==='af'?t.bedrag:'',t.type==='bij'?t.bedrag:'',
       STATUS[s].label.replace(/^[^A-Za-zÀ-ÿ]+/,''),
-      (b&&b.categorie)||t.categorie||'',
+      (b&&b.categorie)||t.categorie||((herkend(t)||{}).cat)||'',
       b&&enkel?(b.btw||0):'',
       l?l.tekst:'',
       b?b.bedrag:'',fooi||'',
@@ -2037,6 +2122,12 @@ document.addEventListener('click',function(e){
     case 'alleen-excel': maakPakketje(false);break;
     case 'backup': downloadBackup();break;
     case 'afs-weg': verwijderAfschrift(el.getAttribute('data-afs'));break;
+    case 'alias': if(t) vraagEigenNaam(t);break;
+    case 'alias-opslaan':
+      if(t){var an=$('alias-naam').value.trim(),ac=$('alias-cat').value;sluitModal();zetEigenNaam(t,an,ac);
+        zetMelding(an?'✓ "'+t.omschrijving.split(' - ')[0]+'" heet nu "'+an+'" — bij alle regels met die naam.':'✓ Eigen naam gewist.','ok');render();}
+      break;
+    case 'alias-weg': if(t){sluitModal();zetEigenNaam(t,'','');}break;
     case 'geen-match':
       if(t&&b){genegeerd[t.id]=genegeerd[t.id]||[];if(genegeerd[t.id].indexOf(b.id)<0) genegeerd[t.id].push(b.id);stempel(t);naWijziging(true,false);}break;
     case 'geen-overboeking':
