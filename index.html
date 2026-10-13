@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 15:44</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 15:53</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -1436,7 +1436,8 @@ function importeer(gevonden,naam,soort,dataUrl){
   // Regels die er al in stonden (bijv. eerder als CSV ingelezen): het originele afschrift eraan
   // hangen, en een ontbrekend rekeningnummer aanvullen uit dit bestand.
   r.bestaand.forEach(function(t){
-    var gewijzigd=false;
+    var gewijzigd=true;
+    t.herIngelezen=geupload;t.herIngelezenTs=Date.now(); // zichtbaar in het overzicht van afschriften
     if(!t.afsOrigineel){t.afsOrigineel=afsId;t.afsOrigineelNaam=naam;gewijzigd=true;}
     if(!t.rekening){
       var nr=gevonden.filter(function(n){return n.type===t.type&&Math.abs(n.bedrag-t.bedrag)<0.005&&n.rekening&&dagVerschil(n.datum,t.datum)<=1;})[0];
@@ -1451,11 +1452,16 @@ function importeer(gevonden,naam,soort,dataUrl){
     (r.bestaand.length?', '+r.bestaand.length+' stond'+(r.bestaand.length!==1?'en':'')+' er al in':'')+
     (aangevuld?' ('+aangevuld+' daarvan '+(aangevuld!==1?'kregen':'kreeg')+' een betere omschrijving)':'')+'.'+
     (zonderRek?' Let op: '+zonderRek+' regel'+(zonderRek!==1?'s hebben':' heeft')+' een onbekend rekeningnummer.':'')+
+    (!r.nieuw.length&&r.bestaand.length?' In het overzicht staan ze onder het afschrift waarmee ze eerder zijn ingelezen.':'')+
     ' Origineel wordt bewaard voor de boekhouder…','ok');
   // Naar de periode van dit afschrift springen.
   var laatste=null;gevonden.forEach(function(t){var d=parseDatumNL(t.datum);if(d&&(!laatste||d>laatste)) laatste=d;});
   if(laatste){fJaar=laatste.getFullYear();fKwartaal=Math.ceil((laatste.getMonth()+1)/3);fMaand='alle';}
   naWijziging(true,false);
+  // Hangt er geen enkele regel aan dit bestand (alles stond er al in, mét origineel)? Dan niet
+  // nóg een keer opslaan: dat kost alleen ruimte.
+  var nodig=r.nieuw.length||r.bestaand.some(function(t){return t.afsOrigineel===afsId;});
+  if(!nodig){melding.tekst=melding.tekst.replace(' Origineel wordt bewaard voor de boekhouder…',' Het origineel was al bewaard ✓');render();return;}
   // Origineel bewaren en controleren of het echt is aangekomen.
   bewaarOrigineel(afsId,dataUrl).then(function(){return laadOrigineel(afsId);}).then(function(terug){
     if(terug!==dataUrl) throw new Error('niet teruggevonden');
@@ -2038,6 +2044,7 @@ function afschriftGroepen(){
     var id=t.afschriftId||'oud';
     var x=g[id]||(g[id]={id:id,naam:id==='oud'?'Eerder ingelezen (zonder naam)':(t.afschriftNaam||'Afschrift'),geupload:t.geupload||'',reks:{},n:0,af:0,bij:0,van:null,tot:null});
     x.n++;x.reks[rekKortT(t)]=true;
+    if(t.herIngelezenTs&&(!x.herTs||t.herIngelezenTs>x.herTs)){x.herTs=t.herIngelezenTs;x.her=t.herIngelezen;}
     var d=parseDatumNL(t.datum);
     if(d){if(!x.van||d<x.van) x.van=d;if(!x.tot||d>x.tot) x.tot=d;}
   });
@@ -2055,7 +2062,7 @@ function renderAfschriftenLijst(){
   toon.forEach(function(g){
     h+='<div class="bon"><div style="min-width:0;flex:1"><div class="oms">📄 '+esc(g.naam)+'</div>'+
       '<div class="sub">'+esc(Object.keys(g.reks).join(', '))+' · '+kortDatum(g.van)+' – '+kortDatum(g.tot)+' · '+g.n+' regel'+(g.n!==1?'s':'')+
-      (g.geupload?' · geüpload '+esc(g.geupload):'')+'</div></div>'+
+      (g.geupload?' · geüpload '+esc(g.geupload):'')+(g.her&&g.her!==g.geupload?' · opnieuw ingelezen '+esc(g.her):'')+'</div></div>'+
       (g.id==='oud'?'':'<button class="knopje" data-act="afs-weg" data-afs="'+esc(g.id)+'" title="Dit afschrift en zijn regels verwijderen">🗑</button>')+'</div>';
   });
   if(lijst.length>8) h+='<button class="knopje" data-act="afs-alles">'+(afsAllesTonen?'Minder tonen':'Alle '+lijst.length+' tonen')+'</button>';
