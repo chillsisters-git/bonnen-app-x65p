@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 14:53</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 15:02</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -1633,7 +1633,7 @@ function render(){
 function telTeDoen(){return transacties.filter(function(t){return !isKlaar(t);}).length;}
 function renderTabs(){
   var nBakje=bonnen.filter(inBakje).length;
-  var nOpv=transacties.filter(function(t){return txStatus(t)==='opvragen';}).length;
+  var nOpv=transacties.filter(function(t){return txStatus(t)==='opvragen';}).length+vraagLijst().length;
   var nTodo=telTeDoen();
   var tabs=[['verwerken','Verwerken',nTodo],['bakje','Bonnenbakje',nBakje],['opvragen','Opvragen',nOpv],['kwartaal','Kwartaal',0]];
   $('tabs').innerHTML=tabs.map(function(x){
@@ -1724,6 +1724,7 @@ function renderRij(t,paren){
   var hint='';
   if(t.type==='af'&&(s==='open'||s==='opvragen')&&voorstellenVoorTx(t,paren).length) hint='<span class="st st-oranje">💡 voorstel</span>';
   if((s==='open'||s==='prive-std')&&overboekingPartner(t)) hint+='<span class="st st-blauw">🔁 overboeking?</span>';
+  if(t.vraag) hint+='<span class="st st-blauw">❓ vraag</span>';
   var h='<div class="rij k-'+S.kleur+(open?' open':'')+'" data-act="open" data-tx="'+esc(t.id)+'">'+
     (function(){var hk=herkend(t);return hk?
       '<div class="rij-l"><div class="oms">'+esc(hk.naam)+' <span class="klein">· '+esc(t.omschrijving)+'</span></div>':
@@ -1743,7 +1744,9 @@ function renderPaneel(t,paren){
   var hk=herkend(t);
   h+='<div class="klein" style="margin-top:4px">'+(hk?'Herkend als <b>'+esc(hk.naam)+'</b>'+(hk.cat?' · '+esc(hk.cat):'')+(hk.bron==='app'?' (door de app)':'')+' · ':'')+
     '<a href="#" data-act="alias"'+id+'>'+(hk?'✏️ andere naam':'🏷 geef herkenbare naam')+'</a> · '+
-    '<a href="'+esc(zoekLink(t))+'" target="_blank" rel="noopener">🔎 opzoeken</a></div>';
+    '<a href="'+esc(zoekLink(t))+'" target="_blank" rel="noopener">🔎 opzoeken</a> · '+
+    '<a href="#" data-act="vraag"'+id+'>'+(t.vraag?'✏️ vraag aanpassen':'❓ vraag stellen')+'</a></div>';
+  if(t.vraag) h+=vraagBlok(t.vraag,t,id);
   // Al afgehandeld
   if(S.klaar&&s!=='prive-std'){
     h+='<h4>Afgehandeld</h4>';
@@ -1850,7 +1853,8 @@ function renderBakje(){
       (vs.length?'<span class="st st-oranje">💡 '+vs.length+' mogelijke afschrijving'+(vs.length!==1?'en':'')+'</span>':
       (afschriftDekt?'<span class="st st-oranje">⚠ geen afschrijving gevonden — klopt bedrag of rekening?</span>':'<span class="st st-grijs">⏳ wacht op het afschrift</span>'));
     h+='<div class="bon"><div style="min-width:0;flex:1"><div class="oms">🧾 '+esc(b.omschrijving||'—')+'</div>'+
-      '<div class="sub">'+esc(b.datum)+' · '+esc((b.betaald||'').replace(/\s*\(.*\)/,''))+(b.toegevoegdDoor?' · door '+esc(b.toegevoegdDoor):'')+' '+stat+'</div>';
+      '<div class="sub">'+esc(b.datum)+' · '+esc((b.betaald||'').replace(/\s*\(.*\)/,''))+(b.toegevoegdDoor?' · door '+esc(b.toegevoegdDoor):'')+' '+stat+'</div>'+
+      (b.vraag?vraagBlok(b.vraag,b,' data-bon="'+b.id+'"'):'');
     vs.forEach(function(v){
       h+='<div class="voorstel" style="margin-top:8px"><div><div class="rede">💡 '+esc(v.reden)+'</div><div class="klein">🏦 '+esc(v.tx.datum)+' · '+esc(v.tx.omschrijving||'—')+' · '+fmt(v.tx.bedrag)+' · '+esc(rekKortT(v.tx))+'</div></div>'+
         '<div class="acties"><button class="knopje" data-act="geen-match" data-tx="'+esc(v.tx.id)+'" data-bon="'+b.id+'">✕ Geen match</button>'+
@@ -1858,7 +1862,7 @@ function renderBakje(){
     });
     h+='<div class="acties" style="margin-top:8px">'+(b.heeftFoto?knop('foto','📷 Bekijk',' data-bon="'+b.id+'"'):'')+
       knop('bon-bewerk','✏️ Bewerk',' data-bon="'+b.id+'"')+knop('bon-contant','💶 Was contant',' data-bon="'+b.id+'"')+
-      knop('bon-klopt','✅ Klopt zo',' data-bon="'+b.id+'" title="Afhandelen zonder bankregel"')+knop('bon-weg','🗑',' data-bon="'+b.id+'"')+'</div>';
+      knop('vraag',b.vraag?'❓ Vraag ✏️':'❓ Vraag',' data-bon="'+b.id+'"')+knop('bon-klopt','✅ Klopt zo',' data-bon="'+b.id+'" title="Afhandelen zonder bankregel"')+knop('bon-weg','🗑',' data-bon="'+b.id+'"')+'</div>';
     h+='</div><div class="bedrag" style="margin-left:8px">'+fmt(b.bedrag)+'</div></div>';
   });
   var contant=sorteerOpDatumDesc(bonnen.filter(function(b){return isContant(b)&&inPeriode(b.datum);}));
@@ -1887,11 +1891,42 @@ function opvraagLijst(){
     return opvragenAlles&&t.type==='af'&&(s==='open'||s==='twijfel')&&inPeriode(t.datum);
   })).reverse();
 }
+function vraagLijst(){
+  var uit=[];
+  bonnen.forEach(function(b){if(b.vraag) uit.push({soort:'bon',x:b,datum:b.datum,oms:b.omschrijving,bedrag:b.bedrag,wat:'bon'+(b.betaald?' · '+(b.betaald||'').replace(/\s*\(.*\)/,''):'')});});
+  transacties.forEach(function(t){if(t.vraag) uit.push({soort:'tx',x:t,datum:t.datum,oms:(herkend(t)?herkend(t).naam:t.omschrijving),bedrag:t.bedrag,wat:rekKortT(t)+(t.type==='bij'?' (bij)':'')});});
+  uit.sort(function(a,b){return (parseDatumNL(a.datum)||0)-(parseDatumNL(b.datum)||0);});
+  return uit;
+}
+function vraagBlok(tekst,x,attrs){
+  return '<div class="voorstel" style="background:var(--blauw-bg);border-color:#c9d8fb;margin-top:8px"><div style="min-width:0"><div class="rede" style="color:var(--blauw)">❓ Vraag'+(x.vraagDoor?' van '+esc(x.vraagDoor):'')+'</div>'+
+    '<div style="white-space:pre-wrap">'+esc(tekst)+'</div></div>'+
+    '<div class="acties"><button class="knopje" data-act="vraag"'+attrs+'>✏️</button><button class="knopje" data-act="vraag-weg"'+attrs+'>✓ Beantwoord</button></div></div>';
+}
+function vraagModal(t,b){
+  var x=t||b,attrs=t?' data-tx="'+esc(t.id)+'"':' data-bon="'+b.id+'"';
+  var over=t?('🏦 '+t.datum+' · '+(t.omschrijving||'—')+' · '+fmt(t.bedrag)):('🧾 '+b.datum+' · '+(b.omschrijving||'—')+' · '+fmt(b.bedrag));
+  toonModal('<div class="modal-box"><h3>❓ Vraag aan de opdrachtgever</h3>'+
+    '<p class="klein" style="margin-bottom:8px">'+esc(over)+'</p>'+
+    '<div class="veld"><label>Wat wil je weten?</label><textarea id="vraag-tekst" style="height:90px" placeholder="bijv. Is deze bon in 2 keer betaald (Revolut € 123,70 + bunq privé € 23,98)?">'+esc(x.vraag||'')+'</textarea></div>'+
+    '<p class="klein" style="margin-top:6px">De vraag komt in het tabblad <b>Opvragen</b>, zodat je alles in één bericht kunt sturen.</p>'+
+    '<div class="balk" style="margin-top:14px"><button class="knop" data-act="vraag-opslaan"'+attrs+'>Opslaan</button>'+
+    (x.vraag?'<button class="knopje" data-act="vraag-weg"'+attrs+'>✓ Beantwoord</button>':'')+
+    '<button class="knop licht" data-act="modal-dicht">Annuleren</button></div></div>');
+  setTimeout(function(){var e=$('vraag-tekst');if(e) e.focus();},50);
+}
 function opvraagTekst(){
-  var lijst=opvraagLijst();
+  var lijst=opvraagLijst(),vragen=vraagLijst();
   var groepen={};
+  var top=[];
+  if(vragen.length){
+    top.push('Vragen ('+vragen.length+')','');
+    vragen.forEach(function(v){top.push('• '+v.datum+' · '+(v.oms||'—')+' · '+fmt(v.bedrag)+' · '+v.wat,'  '+v.x.vraag.replace(/\n/g,'\n  '));});
+    top.push('');
+  }
+  if(!lijst.length) return top.join('\n').trim();
   lijst.forEach(function(t){(groepen[rekKortT(t)]=groepen[rekKortT(t)]||[]).push(t);});
-  var regels=['Bonnen die ik nog mis','('+lijst.length+' stuk'+(lijst.length!==1?'s':'')+', samen '+fmt(lijst.reduce(function(s,t){return s+t.bedrag;},0))+')',''];
+  var regels=top.concat(['Bonnen die ik nog mis','('+lijst.length+' stuk'+(lijst.length!==1?'s':'')+', samen '+fmt(lijst.reduce(function(s,t){return s+t.bedrag;},0))+')','']);
   Object.keys(groepen).forEach(function(g){
     regels.push(g+':');
     groepen[g].forEach(function(t){regels.push('• '+t.datum+' · '+(t.omschrijving||'—')+' · '+fmt(t.bedrag));});
@@ -1902,9 +1937,19 @@ function opvraagTekst(){
 }
 function renderOpvragen(){
   var lijst=opvraagLijst();
-  var h='<p class="klein" style="margin-bottom:10px">Bankregels waarbij je op <b>📤 Bon opvragen</b> hebt getikt. Komt de bon binnen, upload hem dan in het bonnenbakje: hij verschijnt vanzelf als voorstel.</p>';
+  var h='<p class="klein" style="margin-bottom:10px">Hier staan je <b>❓ vragen</b> en de bankregels waarbij je op <b>📤 Bon opvragen</b> hebt getikt. Onderaan staat alles in één bericht, klaar om te kopiëren. Komt een bon binnen, upload hem dan in het bonnenbakje: hij verschijnt vanzelf als voorstel.</p>';
   h+='<label class="klein" style="display:flex;gap:6px;align-items:center;margin-bottom:10px;cursor:pointer"><input type="checkbox" style="width:auto" data-act="opvragen-alles"'+(opvragenAlles?' checked':'')+'> ook alle open afschrijvingen van '+esc(periodeLabel())+' meenemen</label>';
-  if(!lijst.length) return h+'<div class="leeg">Er staat niets op de lijst.</div>';
+  var vragen=vraagLijst();
+  if(vragen.length){
+    h+='<div class="dag">❓ Open vragen ('+vragen.length+')</div>';
+    vragen.forEach(function(v){
+      var attrs=v.soort==='tx'?' data-tx="'+esc(v.x.id)+'"':' data-bon="'+v.x.id+'"';
+      h+='<div class="bon" style="display:block"><div style="display:flex;justify-content:space-between;gap:10px"><div style="min-width:0;flex:1"><div class="oms">'+(v.soort==='bon'?'🧾 ':'🏦 ')+esc(v.oms||'—')+'</div><div class="sub">'+esc(v.datum)+' · '+esc(v.wat)+'</div></div>'+
+        '<div class="bedrag">'+fmt(v.bedrag)+'</div></div>'+vraagBlok(v.x.vraag,v.x,attrs)+'</div>';
+    });
+  }
+  if(!lijst.length&&!vragen.length) return h+'<div class="leeg">Er staat niets op de lijst.</div>';
+  if(lijst.length) h+='<div class="dag">📤 Bonnen opvragen ('+lijst.length+')</div>';
   lijst.forEach(function(t){
     h+='<div class="bon"><div style="min-width:0;flex:1"><div class="oms">'+esc(t.omschrijving||'—')+'</div><div class="sub">'+esc(t.datum)+' · '+esc(rekKortT(t))+' '+statusChip(t)+'</div></div>'+
       '<div class="acties">'+knop('bon-upload','📷 Bon',' data-tx="'+esc(t.id)+'"')+'</div><div class="bedrag" style="margin-left:8px">'+fmt(t.bedrag)+'</div></div>';
@@ -2223,6 +2268,17 @@ document.addEventListener('click',function(e){
     case 'backup': downloadBackup();break;
     case 'afs-weg': verwijderAfschrift(el.getAttribute('data-afs'));break;
     case 'alias': if(t) vraagEigenNaam(t);break;
+    case 'vraag': if(t||b) vraagModal(t,b);break;
+    case 'vraag-opslaan':
+      var vx=t||b;if(!vx) break;
+      var vt=$('vraag-tekst').value.trim();sluitModal();
+      if(vt){vx.vraag=vt;vx.vraagDoor=gebruiker||'';vx.vraagOp=nuLabel();zetMelding('✓ Vraag bewaard — je vindt hem in het tabblad Opvragen.','ok');}
+      else{delete vx.vraag;delete vx.vraagDoor;delete vx.vraagOp;}
+      stempel(vx);naWijziging(!!t,!!b);break;
+    case 'vraag-weg':
+      var vw=t||b;if(!vw) break;
+      sluitModal();delete vw.vraag;delete vw.vraagDoor;delete vw.vraagOp;stempel(vw);
+      zetMelding('✓ Vraag afgevinkt.','ok');naWijziging(!!t,!!b);break;
     case 'alias-opslaan':
       if(t){var an=$('alias-naam').value.trim(),ac=$('alias-cat').value;sluitModal();zetEigenNaam(t,an,ac);
         zetMelding(an?'✓ "'+t.omschrijving.split(' - ')[0]+'" heet nu "'+an+'" — bij alle regels met die naam.':'✓ Eigen naam gewist.','ok');render();}
