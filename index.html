@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 09:48</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 10:17</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -881,8 +881,8 @@ function voorstellenVoorTx(t,paren){
   bonnen.forEach(function(b){
     if(isContant(b)||b.handmatigGematcht) return;
     if(!b.herhalend&&isVolledigGematcht(b)) return;
+    if((genegeerd[t.id]||[]).indexOf(b.id)>=0) return; // weggedrukt met "Geen match"
     if(twijfel.indexOf(b.id)>=0){uit.push({bon:b,rang:-1,reden:'zelfde bedrag en datum',dagen:0});return;}
-    if((genegeerd[t.id]||[]).indexOf(b.id)>=0) return;
     var v=voorstelVoor(b,t,paren,false);
     if(v) uit.push({bon:b,rang:v.rang,reden:v.reden,dagen:v.dagen==null?99:v.dagen});
   });
@@ -913,6 +913,7 @@ function overboekingPartner(t){
     if(Math.abs(u.bedrag-t.bedrag)>0.005) return;
     if(matchesByTxId[u.id]!=null) return;
     if(u.status&&u.status!=='overboeking') return;
+    if((t.geenOverboeking||[]).indexOf(u.id)>=0||(u.geenOverboeking||[]).indexOf(t.id)>=0) return;
     var d=dagVerschil(u.datum,t.datum);
     if(d===null||d>5) return;
     if(d<bd){bd=d;beste=u;}
@@ -1594,7 +1595,8 @@ function renderPaneel(t,paren){
       knop('geenbon-kies','Geen bon nodig',id)+knop('status','Privé',id+' data-code="prive"')+
       (s==='opvragen'?knop('reset','Niet meer opvragen',id):knop('status','📤 Bon opvragen',id+' data-code="opvragen"'))+
       (isPriveRek(t)&&t.zakelijk?knop('niet-zakelijk','Toch privé',id):'')+
-    '</div><div data-geenbon="'+esc(t.id)+'"></div>';
+    '</div><div data-geenbon="'+esc(t.id)+'"></div>'+
+    (((genegeerd[t.id]||[]).length||(t.geenOverboeking||[]).length)?'<div class="klein" style="margin-top:8px">'+((genegeerd[t.id]||[]).length+(t.geenOverboeking||[]).length)+' voorstel(len) weggedrukt · <a href="#" data-act="voorstellen-terug"'+id+'>terugzetten</a></div>':'');
   } else {
     var p2=overboekingPartner(t);
     if(p2){h+='<h4>Voorstel</h4>'+overboekingHtml(t,p2);}
@@ -1615,12 +1617,14 @@ function voorstelHtml(t,v){
     '<div>🧾 '+esc(b.omschrijving||'—')+' · '+fmt(b.bedrag)+' · '+esc(b.datum)+'</div>'+
     '<div class="klein">'+esc(b.betaald||'')+(b.toegevoegdDoor?' · door '+esc(b.toegevoegdDoor):'')+'</div></div>'+
     '<div class="acties">'+(b.heeftFoto?knop('foto','📷',' data-bon="'+b.id+'"'):'')+
+    '<button class="knopje" data-act="geen-match" data-tx="'+esc(t.id)+'" data-bon="'+b.id+'" title="Dit voorstel klopt niet — niet meer tonen">✕ Geen match</button>'+
     '<button class="knop" style="padding:8px 12px" data-act="koppel" data-tx="'+esc(t.id)+'" data-bon="'+b.id+'">Koppel</button></div></div>';
 }
 function overboekingHtml(t,p){
   return '<div class="voorstel" style="border-color:#c9d8f7;background:var(--blauw-bg)"><div><div class="rede" style="color:var(--blauw)">🔁 Eigen overboeking?</div>'+
     '<div class="klein">'+(p.type==='bij'?'Komt bij op ':'Gaat af van ')+esc(rekKortT(p))+' op '+esc(p.datum)+' · '+fmt(p.bedrag)+'</div></div>'+
-    '<button class="knop" style="padding:8px 12px" data-act="overboeking" data-tx="'+esc(t.id)+'" data-partner="'+esc(p.id)+'">Ja, beide markeren</button></div>';
+    '<div class="acties"><button class="knopje" data-act="geen-overboeking" data-tx="'+esc(t.id)+'" data-partner="'+esc(p.id)+'">✕ Nee</button>'+
+    '<button class="knop" style="padding:8px 12px" data-act="overboeking" data-tx="'+esc(t.id)+'" data-partner="'+esc(p.id)+'">Ja, beide markeren</button></div></div>';
 }
 function vulZoekresultaten(input){
   var txId=input.getAttribute('data-tx'),soort=input.getAttribute('data-zoek');
@@ -1664,7 +1668,8 @@ function renderBakje(){
       '<div class="sub">'+esc(b.datum)+' · '+esc((b.betaald||'').replace(/\s*\(.*\)/,''))+(b.toegevoegdDoor?' · door '+esc(b.toegevoegdDoor):'')+' '+stat+'</div>';
     vs.forEach(function(v){
       h+='<div class="voorstel" style="margin-top:8px"><div><div class="rede">💡 '+esc(v.reden)+'</div><div class="klein">🏦 '+esc(v.tx.datum)+' · '+esc(v.tx.omschrijving||'—')+' · '+fmt(v.tx.bedrag)+' · '+esc(rekKortT(v.tx))+'</div></div>'+
-        '<button class="knop" style="padding:7px 11px" data-act="koppel" data-tx="'+esc(v.tx.id)+'" data-bon="'+b.id+'">Koppel</button></div>';
+        '<div class="acties"><button class="knopje" data-act="geen-match" data-tx="'+esc(v.tx.id)+'" data-bon="'+b.id+'">✕ Geen match</button>'+
+        '<button class="knop" style="padding:7px 11px" data-act="koppel" data-tx="'+esc(v.tx.id)+'" data-bon="'+b.id+'">Koppel</button></div></div>';
     });
     h+='<div class="acties" style="margin-top:8px">'+(b.heeftFoto?knop('foto','📷 Bekijk',' data-bon="'+b.id+'"'):'')+
       knop('bon-bewerk','✏️ Bewerk',' data-bon="'+b.id+'"')+knop('bon-contant','💶 Was contant',' data-bon="'+b.id+'"')+
@@ -2032,6 +2037,13 @@ document.addEventListener('click',function(e){
     case 'alleen-excel': maakPakketje(false);break;
     case 'backup': downloadBackup();break;
     case 'afs-weg': verwijderAfschrift(el.getAttribute('data-afs'));break;
+    case 'geen-match':
+      if(t&&b){genegeerd[t.id]=genegeerd[t.id]||[];if(genegeerd[t.id].indexOf(b.id)<0) genegeerd[t.id].push(b.id);stempel(t);naWijziging(true,false);}break;
+    case 'geen-overboeking':
+      var pp=txMap[el.getAttribute('data-partner')];
+      if(t&&pp){t.geenOverboeking=(t.geenOverboeking||[]).concat([pp.id]);stempel(t);naWijziging(true,false);}break;
+    case 'voorstellen-terug':
+      if(t){delete genegeerd[t.id];delete t.geenOverboeking;stempel(t);naWijziging(true,false);}break;
     case 'afs-alles': afsAllesTonen=!afsAllesTonen;render();break;
   }
 });
