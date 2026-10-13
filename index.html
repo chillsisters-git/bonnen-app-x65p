@@ -91,7 +91,7 @@ a{color:var(--blauw)}
     <div class="kop-r">
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 16:31</span>
+      <span class="klein" title="Versie van deze pagina">v13-10 16:42</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -1699,11 +1699,79 @@ function renderPeriodeBalk(metRek,modus){
   return h;
 }
 
+// ---------- Afschriften-check per rekening (bovenaan Verwerken) ----------
+// Per rekening en maand: is het afschrift er, dekt het de hele maand, en is het met de nieuwe app
+// ingelezen (met het originele bestand voor de boekhouder)?
+function maandenInPeriode(){
+  if(fMaand!=='alle') return [fMaand];
+  if(fKwartaal) return [fKwartaal*3-2,fKwartaal*3-1,fKwartaal*3];
+  return [1,2,3,4,5,6,7,8,9,10,11,12];
+}
+function afschriftCheck(rek,j,m){
+  var begin=new Date(j,m-1,1),eind=new Date(j,m,0);
+  var vandaag=new Date();vandaag.setHours(0,0,0,0);
+  if(begin>vandaag) return null;
+  var tot=eind<vandaag?eind:vandaag;
+  var van=transacties.filter(function(t){return rekNaam(t)===rek;});
+  var inM=van.filter(function(t){var d=parseDatumNL(t.datum);return d&&d>=begin&&d<=eind;});
+  if(!inM.length){
+    var eerste=null;van.forEach(function(t){var d=parseDatumNL(t.datum);if(d&&(!eerste||d<eerste)) eerste=d;});
+    return {st:'mist',inM:inM,eerste:eerste,leeg:!van.length};
+  }
+  // Per bestand loopt een afschrift van de eerste tot de laatste regel. Aaneengesloten bestanden
+  // (gat van hooguit 14 dagen) tellen samen; dekt dat de hele maand (marge 14 dagen), dan is het compleet.
+  var DAG=86400000,MARGE=14*DAG,per={};
+  van.forEach(function(t){var d=parseDatumNL(t.datum);if(!d) return;var k=t.afschriftId||t.afschriftNaam||'oud';
+    var r=per[k]||(per[k]={a:d,b:d});if(d<r.a) r.a=d;if(d>r.b) r.b=d;});
+  var reeksen=Object.keys(per).map(function(k){return per[k];}).sort(function(x,y){return x.a-y.a;});
+  var samen=[];reeksen.forEach(function(r){var l=samen[samen.length-1];
+    if(l&&r.a.getTime()<=l.b.getTime()+MARGE){if(r.b>l.b) l.b=r.b;} else samen.push({a:r.a,b:r.b});});
+  var dekt=samen.some(function(r){return r.a.getTime()<=begin.getTime()+MARGE&&r.b.getTime()>=tot.getTime()-MARGE;});
+  var max=null,min=null;inM.forEach(function(t){var d=parseDatumNL(t.datum);if(!d) return;if(!max||d>max) max=d;if(!min||d<min) min=d;});
+  var oud=inM.filter(function(t){return !t.afsOrigineel;}).length;
+  return {st:oud?'oud':(dekt?'ok':'half'),inM:inM,oud:oud,max:max,min:min};
+}
+var CHECK_STIJL={ok:['✓','st-groen','in orde'],half:['◐','st-oranje','niet de hele maand'],oud:['⚠','st-oranje','opnieuw uploaden'],mist:['⚪','st-grijs','ontbreekt']};
+var CHECK_RANG={ok:0,half:1,oud:2,mist:3};
+function afschriftenBalk(){
+  var ms=maandenInPeriode();
+  var items=BEKENDE_REKENINGEN.map(function(rek){
+    var slechtste=null;
+    ms.forEach(function(m){var c=afschriftCheck(rek,fJaar,m);if(c&&(!slechtste||CHECK_RANG[c.st]>CHECK_RANG[slechtste.st])) slechtste=c;});
+    return slechtste?{rek:rek,c:slechtste}:null;
+  }).filter(Boolean);
+  if(!items.length) return '';
+  var allesOk=items.every(function(x){return x.c.st==='ok';});
+  return '<div class="kaart" style="padding:10px 12px"><div class="klein" style="margin-bottom:6px">Afschriften '+esc(periodeLabel())+(allesOk?' — alles compleet ✓':' — tik voor details')+'</div><div class="balk" style="margin:0">'+
+    items.map(function(x){var S=CHECK_STIJL[x.c.st];
+      return '<button class="st '+S[1]+'" style="border:none;cursor:pointer;font-size:12px;padding:4px 9px" data-act="afs-check" data-rek="'+esc(x.rek)+'" title="'+esc(S[2])+'">'+S[0]+' '+esc(x.rek.replace(/\s*\(.*\)/,''))+(x.c.st!=='ok'?' · '+S[2]:'')+'</button>';}).join('')+'</div></div>';
+}
+function toonAfschriftCheck(rek){
+  var ms=maandenInPeriode(),h='<div class="modal-box"><h3>'+esc(rek.replace(/\s*\(.*\)/,''))+' · '+esc(periodeLabel())+'</h3>';
+  var nodig=false;
+  ms.forEach(function(m){
+    var c=afschriftCheck(rek,fJaar,m);if(!c) return;
+    var S=CHECK_STIJL[c.st];if(c.st!=='ok') nodig=true;
+    var uitleg={ok:'Het afschrift is er en het originele bestand is bewaard.',
+      half:'Er staan regels van '+(c.min?kortDatum(c.min):'?')+' tot '+(c.max?kortDatum(c.max):'?')+'. Mist er een stuk van de maand? Upload dan dat afschrift. (Is de rekening pas later geopend of was er gewoon weinig gebruik, dan is het in orde.)',
+      oud:c.oud+' regel'+(c.oud!==1?'s zijn':' is')+' nog met de oude app ingelezen (zonder origineel voor de boekhouder, soms zonder bedrijfsnaam). Upload dit afschrift nog een keer: er komen geen dubbele regels bij.',
+      mist:c.leeg?'Van deze rekening is nog helemaal niets geüpload.':'Nog geen afschrift van deze maand.'+(c.eerste&&c.eerste>new Date(fJaar,m,0)?' (De eerste regel van deze rekening is van '+kortDatum(c.eerste)+'; was de rekening toen nog niet in gebruik, dan is het in orde.)':'')}[c.st];
+    var bestanden={};(c.inM||[]).forEach(function(t){var n=t.afsOrigineelNaam||t.afschriftNaam;if(n) bestanden[n]=true;});
+    h+='<div style="margin-top:10px"><span class="st '+S[1]+'">'+S[0]+' '+MAAND_NAMEN[m-1]+' '+fJaar+' · '+S[2]+'</span>'+
+      (c.inM&&c.inM.length?' <span class="klein">'+c.inM.length+' regels</span>':'')+
+      '<div class="klein" style="margin-top:4px">'+esc(uitleg)+'</div>'+
+      (Object.keys(bestanden).length?'<div class="klein" style="margin-top:2px">📄 '+Object.keys(bestanden).map(esc).join(', ')+'</div>':'')+'</div>';
+  });
+  h+='<div class="balk" style="margin-top:16px">'+(nodig?'<button class="knop" data-act="afs-check-upload">↑ Afschrift uploaden</button>':'')+
+    '<button class="knop licht" data-act="modal-dicht">Sluiten</button></div></div>';
+  toonModal(h);
+}
 // ---------- Tab: Verwerken ----------
 function renderVerwerken(){
   var h='<div class="balk" style="margin-bottom:12px"><button class="knop" data-act="afschrift-upload">↑ Afschrift uploaden</button>'+
     '<span class="klein">MT940 van bunq/ABN, TAB van ABN, Revolut-CSV, of de Visa-PDF van ICS</span></div>';
   h+=renderPeriodeBalk(true);
+  h+=afschriftenBalk();
   var inP=transacties.filter(function(t){return inPeriode(t.datum)&&rekOk(t);});
   var klaar=inP.filter(isKlaar).length;
   var pct=inP.length?Math.round(klaar/inP.length*100):0;
@@ -2331,6 +2399,8 @@ document.addEventListener('click',function(e){
     case 'pk-prive': pkPrive=el.checked;break;
     case 'open': if(t){openTxId=openTxId===t.id?null:t.id;render();}break;
     case 'afschrift-upload': $('afschrift-input').click();break;
+    case 'afs-check': toonAfschriftCheck(el.getAttribute('data-rek'));break;
+    case 'afs-check-upload': sluitModal();$('afschrift-input').click();break;
     case 'kies-afs-rek':
       var w=window._afsWacht;if(!w) return;
       var gekozen=el.getAttribute('data-rek');
