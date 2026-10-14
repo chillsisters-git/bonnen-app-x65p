@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="nl">
 <head>
@@ -49,6 +50,7 @@ input,select,textarea{font:inherit;font-size:14px;width:100%;padding:8px 9px;bor
 .rij.open{border-radius:10px 10px 0 0;margin-bottom:0}
 .rij.k-oranje{border-left-color:#f0a63a}.rij.k-groen{border-left-color:#1D9E75}.rij.k-blauw{border-left-color:#5b84e8}.rij.k-grijs{border-left-color:#c7c7cc}
 .rij-l{min-width:0;flex:1}
+.bedrijf-kop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:15px;font-weight:700;margin:16px 2px 6px;padding-bottom:4px;border-bottom:2px solid var(--zwart)}
 .standaard-vink{display:flex;gap:9px;align-items:flex-start;margin-top:12px;padding:10px 12px;border-radius:10px;background:#fffaf0;border:1px solid #f0d9a8;cursor:pointer;font-size:13px}
 .standaard-vink input{margin-top:2px}
 .catkies{position:relative}
@@ -116,7 +118,7 @@ a{color:var(--blauw)}
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="uitleg" title="Uitleg over de app">❓ Uitleg</button>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v14-10 12:25</span>
+      <span class="klein" title="Versie van deze pagina">v14-10 12:45</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -2503,6 +2505,26 @@ function vraagModal(t,b){
     '<button class="knop licht" data-act="modal-dicht">Annuleren</button></div></div>');
   setTimeout(function(){var e=$('vraag-tekst');if(e) e.focus();},50);
 }
+// ---------- Opvragen per bedrijf ----------
+// Des zoekt bonnen per bedrijf op (bijv. alles van Coolblue in zijn mail). Daarom kan de lijst
+// per bedrijf op alfabet (standaard) of op datum. De keuze wordt per apparaat onthouden.
+var opvSort=leesLokaal('x65p-opv-sort')||'bedrijf';
+function bedrijfVan(t){
+  var hk=herkend(t);
+  if(hk&&hk.bron==='eigen') return hk.naam;
+  var o=kortOms((t.omschrijving||'').replace(BETAALDIENST_PREFIX,'').split(' - ')[0]).replace(/\s+\d[\d\s]*$/,'').trim();
+  return o&&o!=='—'?o:'Onbekend bedrijf';
+}
+function bedrijfSleutel(t){var hk=herkend(t);return hk&&hk.bron==='eigen'?'eigen:'+hk.naam.toLowerCase():(naamSleutel(t.omschrijving)||bedrijfVan(t).toLowerCase());}
+// Geeft [{naam, items:[...]}] op alfabet; binnen een bedrijf op datum (oudste eerst).
+function perBedrijf(lijst){
+  var g={};
+  lijst.forEach(function(t){var k=bedrijfSleutel(t);(g[k]=g[k]||{naam:bedrijfVan(t),items:[]}).items.push(t);});
+  return Object.keys(g).map(function(k){
+    g[k].items.sort(function(a,b){return (parseDatumNL(a.datum)||0)-(parseDatumNL(b.datum)||0);});
+    return g[k];
+  }).sort(function(a,b){return a.naam.localeCompare(b.naam,'nl',{sensitivity:'base'});});
+}
 function opvraagTekst(){
   var lijst=opvraagLijst(),vragen=vraagLijst();
   var groepen={};
@@ -2513,13 +2535,25 @@ function opvraagTekst(){
     top.push('');
   }
   if(!lijst.length) return top.join('\n').trim();
-  lijst.forEach(function(t){(groepen[rekKortT(t)]=groepen[rekKortT(t)]||[]).push(t);});
   var regels=top.concat(['Bonnen die ik nog mis','('+lijst.length+' stuk'+(lijst.length!==1?'s':'')+', samen '+fmt(lijst.reduce(function(s,t){return s+t.bedrag;},0))+')','']);
+  if(opvSort==='bedrijf'){
+    perBedrijf(lijst).forEach(function(gr){
+      regels.push(gr.naam+(gr.items.length>1?' ('+gr.items.length+'x)':'')+':');
+      gr.items.forEach(function(t){
+        // Leesbaar kenmerk (bijv. "BESTELLING 88213") meesturen, betaalcodes niet.
+        var rest=(t.omschrijving||'').split(' - ').slice(1).join(' - ').replace(/\s+/g,' ').trim();
+        regels.push('• '+t.datum+' · '+fmt(t.bedrag)+' · '+rekKortT(t)+(rest&&/\s/.test(rest)?' · '+rest:''));
+      });
+      regels.push('');
+    });
+  } else {
+  lijst.forEach(function(t){(groepen[rekKortT(t)]=groepen[rekKortT(t)]||[]).push(t);});
   Object.keys(groepen).forEach(function(g){
     regels.push(g+':');
     groepen[g].forEach(function(t){regels.push('• '+t.datum+' · '+(t.omschrijving||'—')+' · '+fmt(t.bedrag));});
     regels.push('');
   });
+  }
   regels.push('Kun je van deze betalingen de bon of factuur sturen (foto of mail is prima)? Is iets privé, laat het me dan even weten.');
   return regels.join('\n');
 }
@@ -2537,11 +2571,26 @@ function renderOpvragen(){
     });
   }
   if(!lijst.length&&!vragen.length) return h+'<div class="leeg">Er staat niets op de lijst.</div>';
-  if(lijst.length) h+='<div class="dag">📤 Bonnen opvragen ('+lijst.length+')</div>';
-  lijst.forEach(function(t){
-    h+='<div class="bon"><div style="min-width:0;flex:1"><div class="oms">'+esc(t.omschrijving||'—')+'</div><div class="sub">'+esc(t.datum)+' · '+esc(rekKortT(t))+' '+statusChip(t)+'</div></div>'+
+  if(lijst.length){
+    h+='<div class="sectie-kop">📤 Bonnen opvragen ('+lijst.length+')</div>';
+    h+='<div class="balk"><span class="klein">Volgorde:</span>'+
+      '<button class="knopje'+(opvSort==='bedrijf'?' actief':'')+'" data-act="opv-sort" data-s="bedrijf">🔤 Per bedrijf (A–Z)</button>'+
+      '<button class="knopje'+(opvSort==='datum'?' actief':'')+'" data-act="opv-sort" data-s="datum">📅 Op datum</button></div>';
+  }
+  function opvRij(t,metNaam){
+    return '<div class="bon"><div style="min-width:0;flex:1">'+(metNaam?'<div class="oms">'+esc(t.omschrijving||'—')+'</div>':'<div class="oms" style="font-size:13px;color:var(--zacht)">'+esc(kortOms(t.omschrijving))+'</div>')+
+      '<div class="sub"><span class="rij-datum">'+esc(rijDatum(t.datum))+' '+(parseDatumNL(t.datum)?parseDatumNL(t.datum).getFullYear():'')+'</span> · '+esc(rekKortT(t))+' '+statusChip(t)+'</div></div>'+
       '<div class="acties">'+knop('bon-upload','📷 Bon',' data-tx="'+esc(t.id)+'"')+'</div><div class="bedrag" style="margin-left:8px">'+fmt(t.bedrag)+'</div></div>';
-  });
+  }
+  if(opvSort==='bedrijf'){
+    perBedrijf(lijst).forEach(function(gr){
+      var som=gr.items.reduce(function(s,t){return s+t.bedrag;},0);
+      h+='<div class="bedrijf-kop"><span>'+esc(gr.naam)+'</span><span class="klein">'+gr.items.length+'x · '+fmt(som)+'</span></div>';
+      gr.items.forEach(function(t){h+=opvRij(t,false);});
+    });
+  } else {
+    lijst.forEach(function(t){h+=opvRij(t,true);});
+  }
   h+='<div class="kaart" style="margin-top:12px"><textarea readonly style="height:160px;font-size:12px" id="opvraag-tekst">'+esc(opvraagTekst())+'</textarea>'+
     '<div class="balk" style="margin-top:8px"><button class="knop" data-act="opvragen-kopieer">📋 Kopiëren</button>'+
     (navigator.share?'<button class="knop licht" data-act="opvragen-deel">💬 Delen</button>':'')+'</div></div>';
@@ -2782,6 +2831,7 @@ document.addEventListener('click',function(e){
     case 'tab': tab=el.getAttribute('data-tab');melding=null;openTxId=null;if(tab==='bakje') naarBakjeMaand();render();window.scrollTo(0,0);break;
     case 'uitleg': toonUitleg();break;
     case 'zoek-wis': zoekTx='';openTxId=null;render();break;
+    case 'opv-sort': opvSort=el.getAttribute('data-s');bewaarLokaal('x65p-opv-sort',opvSort);render();break;
     case 'zoek-bon-wis': zoekBon='';render();break;
     case 'uitleg-dicht': sluitUitleg();break;
     case 'naam': vraagNaam();break;
