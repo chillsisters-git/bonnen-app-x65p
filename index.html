@@ -18,7 +18,7 @@ input,select,textarea{font:inherit;font-size:14px;width:100%;padding:8px 9px;bor
 .app{max-width:720px;margin:0 auto;padding:0 16px 80px}
 .kop{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0 8px}
 .kop img{height:36px;object-fit:contain}
-.kop-r{display:flex;gap:8px;align-items:center}
+.kop-r{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .chip-naam{font-size:12px;padding:5px 10px;border-radius:99px;background:var(--kaart);border:1px solid var(--lijn)}
 .link-oud{font-size:12px;color:var(--zacht);text-decoration:none}
 .tabs{display:flex;gap:4px;position:sticky;top:0;z-index:20;background:var(--bg);padding:6px 0;border-bottom:1px solid var(--lijn);margin-bottom:12px;overflow-x:auto}
@@ -81,7 +81,21 @@ input,select,textarea{font:inherit;font-size:14px;width:100%;padding:8px 9px;bor
 .laden{text-align:center;padding:30px;color:var(--zacht)}
 .sep{height:1px;background:var(--lijn);margin:12px 0}
 a{color:var(--blauw)}
-@media (max-width:480px){.oms{white-space:normal}.teller-getal{font-size:20px}}
+/* Blok "Afschriften" op de eerste pagina */
+.afs-kaart{border:1.5px solid var(--zwart);padding:14px}
+.afs-kop{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.afs-titel{font-size:20px;font-weight:700;letter-spacing:-.2px}
+.sectie-kop{font-size:16px;font-weight:700;margin:18px 2px 8px}
+/* Uitleg bij openen */
+.uitleg h3{font-size:19px;margin-bottom:4px}
+.uitleg-stappen{list-style:none;margin:12px 0;counter-reset:stap}
+.uitleg-stappen li{counter-increment:stap;display:grid;grid-template-columns:26px 1fr;gap:2px 10px;padding:9px 0;border-bottom:1px solid var(--lijn)}
+.uitleg-stappen li:last-child{border-bottom:none}
+.uitleg-stappen li::before{content:counter(stap);grid-row:1 / span 2;width:24px;height:24px;border-radius:50%;background:var(--zwart);color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center}
+.uitleg-stappen b{font-size:14px}
+.uitleg-stappen span{font-size:13px;color:var(--zacht);line-height:1.4}
+.uitleg-jij{background:var(--oranje-bg);color:var(--oranje);border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:8px}
+@media (max-width:480px){.oms{white-space:normal}.teller-getal{font-size:20px}.afs-kop .knop{width:100%}}
 </style>
 </head>
 <body>
@@ -90,8 +104,9 @@ a{color:var(--blauw)}
     <img src="LogoX65P.png" alt="Cross 65 Projects" onerror="this.style.display='none'">
     <div class="kop-r">
       <span class="klein" id="sync"></span>
+      <button class="chip-naam" data-act="uitleg" title="Uitleg over de app">❓ Uitleg</button>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v13-10 18:35</span>
+      <span class="klein" title="Versie van deze pagina">v14-10 10:15</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -1636,6 +1651,35 @@ function bekijkFoto(bonId){
 function toonModal(html){$('modal').innerHTML='<div class="modal" data-act="modal-achter">'+html+'</div>';}
 function sluitModal(){$('modal').innerHTML='';previewSrc=null;}
 
+// ---------- Uitleg bij openen ----------
+// Verschijnt bij het openen van de app, tot je "Niet meer tonen" aanvinkt.
+// Altijd terug te vinden via de knop "❓ Uitleg" bovenaan.
+var UITLEG_VERSIE='2'; // ophogen als de uitleg verandert: dan verschijnt hij bij iedereen opnieuw
+var uitlegOpen=false;
+function toonUitleg(){
+  uitlegOpen=true;
+  var gezien=leesLokaal('x65p-uitleg-gezien')===UITLEG_VERSIE;
+  toonModal('<div class="modal-box uitleg"><h3>👋 Eerst de bank, dan de bonnen</h3>'+
+    '<ol class="uitleg-stappen">'+
+      '<li><b>Verwerken</b><span>Hier zie je alle betalingen van de bank. Upload eerst het bankafschrift. Tik daarna op een betaling en koppel de bon die erbij hoort.</span></li>'+
+      '<li><b>Bonnenbakje</b><span>Heb je een bon, maar is het bankafschrift er nog niet? Zet de bon dan alvast hier. Zodra het afschrift er is, zoekt de app zelf de betaling erbij.</span></li>'+
+      '<li><b>Opvragen</b><span>Alles wat Penny nog van Des nodig heeft: vragen en ontbrekende bonnen. Des, hier upload jij de bon of vink je een vraag af.</span></li>'+
+      '<li><b>Kwartaal</b><span>Het pakket voor de boekhouder: Excel, bonnen en afschriften in één zip.</span></li>'+
+    '</ol>'+
+    '<div class="melding info" style="margin-bottom:12px"><b>Geen bon = telt niet mee als kosten.</b> Zakelijk zonder bon? Kies "Geen bon nodig". Privé? Kies "Privé".</div>'+
+    '<label class="klein" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="uitleg-niet-meer" style="width:auto"'+(gezien?' checked':'')+'> Niet meer tonen bij openen</label>'+
+    '<div class="balk" style="margin-top:12px"><button class="knop breed" data-act="uitleg-dicht">Begrepen</button></div>'+
+    '<p class="klein" style="text-align:center">Later nog eens lezen? Tik bovenaan op <b>❓ Uitleg</b>.</p>'+
+  '</div>');
+}
+function sluitUitleg(){
+  var vink=$('uitleg-niet-meer');
+  if(vink) bewaarLokaal('x65p-uitleg-gezien',vink.checked?UITLEG_VERSIE:'');
+  uitlegOpen=false;
+  sluitModal();
+  if(!gebruiker) vraagNaam();
+}
+
 // ---------- Naam ----------
 var VASTE_NAMEN=['Penny','Des'];
 function vraagNaam(){
@@ -1739,6 +1783,7 @@ function afschriftCheck(rek,j,m){
 }
 var CHECK_STIJL={voor:['–','st-grijs','nog niet in gebruik'],ok:['✓','st-groen','in orde'],half:['◐','st-oranje','niet de hele maand'],oud:['⚠','st-oranje','opnieuw uploaden'],mist:['⚪','st-grijs','ontbreekt']};
 var CHECK_RANG={voor:-1,ok:0,half:1,oud:2,mist:3};
+// Het blok "📄 Afschriften" bovenaan de eerste pagina: duidelijke kop, uploadknop en per rekening de stand.
 function afschriftenBalk(){
   var ms=maandenInPeriode();
   var items=BEKENDE_REKENINGEN.map(function(rek){
@@ -1747,15 +1792,24 @@ function afschriftenBalk(){
     if(!slechtste||slechtste.st==='voor') return null; // hele periode vóór de rekening bestond
     return {rek:rek,c:slechtste,per:per};
   }).filter(Boolean);
-  if(!items.length) return '';
-  var allesOk=items.every(function(x){return x.c.st==='ok';});
-  return '<div class="kaart" style="padding:10px 12px"><div class="klein" style="margin-bottom:6px">Afschriften '+esc(periodeLabel())+(allesOk?' — alles compleet ✓':' — tik voor details')+'</div><div class="balk" style="margin:0">'+
-    items.map(function(x){var S=CHECK_STIJL[x.c.st];
-      var naam=esc(x.rek.replace(/\s*\(.*\)/,''));
-      var tekst=x.per.length>1?naam+' · '+x.per.filter(function(p){return p[1].st!=='voor';}).map(function(p){return MAAND_NAMEN[p[0]-1]+' '+CHECK_STIJL[p[1].st][0];}).join(' '):
-        S[0]+' '+naam+(x.c.st!=='ok'?' · '+(x.c.leeg?'nog niets geüpload':S[2]):'');
-      return '<button class="st '+S[1]+'" style="border:none;cursor:pointer;font-size:12px;padding:4px 9px" data-act="afs-check" data-rek="'+esc(x.rek)+'" title="'+esc(S[2])+'">'+tekst+'</button>';}).join('')+'</div>'+
-    (items.some(function(x){return x.c.st!=='ok';})?'<div class="klein" style="margin-top:6px">✓ in orde · ◐ niet de hele maand · ⚠ opnieuw uploaden · ⚪ ontbreekt</div>':'')+'</div>';
+  var allesOk=items.length&&items.every(function(x){return x.c.st==='ok';});
+  var h='<div class="kaart afs-kaart"><div class="afs-kop"><div>'+
+      '<div class="afs-titel">📄 Afschriften</div>'+
+      '<div class="klein" style="margin-top:2px">'+esc(periodeLabel())+(items.length?(allesOk?' — alles compleet ✓':' — tik op een rekening voor uitleg'):'')+'</div>'+
+    '</div><button class="knop" data-act="afschrift-upload">↑ Afschrift uploaden</button></div>';
+  if(items.length){
+    h+='<div class="balk" style="margin:10px 0 0">'+
+      items.map(function(x){var S=CHECK_STIJL[x.c.st];
+        var naam=esc(x.rek.replace(/\s*\(.*\)/,''));
+        var tekst=x.per.length>1?naam+' · '+x.per.filter(function(p){return p[1].st!=='voor';}).map(function(p){return MAAND_NAMEN[p[0]-1]+' '+CHECK_STIJL[p[1].st][0];}).join(' '):
+          S[0]+' '+naam+(x.c.st!=='ok'?' · '+(x.c.leeg?'nog niets geüpload':S[2]):'');
+        return '<button class="st '+S[1]+'" style="border:none;cursor:pointer;font-size:12px;padding:4px 9px" data-act="afs-check" data-rek="'+esc(x.rek)+'" title="'+esc(S[2])+'">'+tekst+'</button>';}).join('')+'</div>';
+    if(!allesOk) h+='<div class="klein" style="margin-top:6px">✓ in orde · ◐ niet de hele maand · ⚠ opnieuw uploaden · ⚪ ontbreekt</div>';
+  } else {
+    h+='<div class="klein" style="margin-top:8px">Nog geen afschriften in '+esc(periodeLabel())+'.</div>';
+  }
+  h+='<div class="klein" style="margin-top:8px">Welk bestand? MT940 van bunq/ABN, TAB van ABN, Revolut-CSV, of de Visa-PDF van ICS.</div>';
+  return h+'</div>';
 }
 function toonAfschriftCheck(rek){
   var ms=maandenInPeriode(),h='<div class="modal-box"><h3>'+esc(rek.replace(/\s*\(.*\)/,''))+' · '+esc(periodeLabel())+'</h3>';
@@ -1780,10 +1834,9 @@ function toonAfschriftCheck(rek){
 }
 // ---------- Tab: Verwerken ----------
 function renderVerwerken(){
-  var h='<div class="balk" style="margin-bottom:12px"><button class="knop" data-act="afschrift-upload">↑ Afschrift uploaden</button>'+
-    '<span class="klein">MT940 van bunq/ABN, TAB van ABN, Revolut-CSV, of de Visa-PDF van ICS</span></div>';
-  h+=renderPeriodeBalk(true);
+  var h=renderPeriodeBalk(true);
   h+=afschriftenBalk();
+  h+='<div class="sectie-kop">🏦 Bankregels verwerken</div>';
   var inP=transacties.filter(function(t){return inPeriode(t.datum)&&rekOk(t);});
   var klaar=inP.filter(isKlaar).length;
   var pct=inP.length?Math.round(klaar/inP.length*100):0;
@@ -1810,11 +1863,11 @@ function renderVerwerken(){
     return true;
   });
   lijst=sorteerOpDatumDesc(lijst);
-  if(!transacties.length) return h+'<div class="leeg">Nog geen bankregels. Upload een afschrift om te beginnen.</div>';
+  if(!transacties.length) return h+'<div class="leeg">Nog geen bankregels. Upload hierboven bij <b>📄 Afschriften</b> een afschrift om te beginnen.</div>';
   if(!inP.length){
     var filterTekst=fRek!=='alle'?' van '+esc(fRek==='onbekend'?'onbekende rekening':fRek.replace(/\s*\(.*\)/,'')):'';
     return h+'<div class="leeg">Er staan nog <b>geen bankregels</b>'+filterTekst+' in '+esc(periodeLabel())+'.<br>'+
-      (fRek!=='alle'?'Staat er een rekening geselecteerd? Kies dan <b>Alle rekeningen</b>, of ':'')+'Upload eerst het afschrift van deze periode.</div>';
+      (fRek!=='alle'?'Staat er een rekening geselecteerd? Kies dan <b>Alle rekeningen</b>, of ':'')+'Upload eerst het afschrift van deze periode (hierboven bij <b>📄 Afschriften</b>).</div>';
   }
   if(!lijst.length){
     var nPriveVerborgen=inP.filter(function(t){return txStatus(t)==='prive-std';}).length;
@@ -2388,7 +2441,7 @@ document.addEventListener('click',function(e){
   var el=e.target.closest('[data-act]');
   if(!el) return;
   var act=el.getAttribute('data-act');
-  if(act==='modal-achter'){if(e.target===el) sluitModal();return;}
+  if(act==='modal-achter'){if(e.target===el){if(uitlegOpen) sluitUitleg(); else sluitModal();}return;}
   if(el.tagName==='INPUT'&&el.type!=='checkbox') return;
   if(el.tagName==='SELECT') return;
   if(el.tagName==='A') e.preventDefault();
@@ -2396,6 +2449,8 @@ document.addEventListener('click',function(e){
   var bonId=el.getAttribute('data-bon');var b=bonId!=null?bonMap[bonId]:null;
   switch(act){
     case 'tab': tab=el.getAttribute('data-tab');melding=null;openTxId=null;if(tab==='bakje') naarBakjeMaand();render();window.scrollTo(0,0);break;
+    case 'uitleg': toonUitleg();break;
+    case 'uitleg-dicht': sluitUitleg();break;
     case 'naam': vraagNaam();break;
     case 'naam-kies':
       var n=el.getAttribute('data-naam')||($('naam-input')&&$('naam-input').value.trim());
@@ -2541,12 +2596,16 @@ document.addEventListener('drop',function(e){
   var f=e.dataTransfer.files[0];if(f) scanBestand(f,{});
 });
 document.addEventListener('keydown',function(e){
-  if(e.key==='Escape'){var o=$('groot-overlay');if(o) o.remove();else if($('modal').innerHTML) sluitModal();}
+  if(e.key==='Escape'){var o=$('groot-overlay');if(o) o.remove();else if(uitlegOpen) sluitUitleg();else if($('modal').innerHTML) sluitModal();}
 });
 
 // ---------- Start ----------
+// Eerst de uitleg (tot "Niet meer tonen" is aangevinkt), daarna zo nodig de vraag "Wie ben je?".
 gebruiker=leesLokaal('x65p-naam');
-laadAlles(true).then(function(){if(!gebruiker) vraagNaam();});
+laadAlles(true).then(function(){
+  if(leesLokaal('x65p-uitleg-gezien')!==UITLEG_VERSIE) toonUitleg();
+  else if(!gebruiker) vraagNaam();
+});
 
 </script>
 </body>
