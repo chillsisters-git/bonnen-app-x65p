@@ -49,6 +49,11 @@ input,select,textarea{font:inherit;font-size:14px;width:100%;padding:8px 9px;bor
 .rij.open{border-radius:10px 10px 0 0;margin-bottom:0}
 .rij.k-oranje{border-left-color:#f0a63a}.rij.k-groen{border-left-color:#1D9E75}.rij.k-blauw{border-left-color:#5b84e8}.rij.k-grijs{border-left-color:#c7c7cc}
 .rij-l{min-width:0;flex:1}
+.catkies{position:relative}
+.catlijst{display:none;position:absolute;left:0;right:0;top:100%;margin-top:3px;z-index:10;background:var(--kaart);border:1px solid #d8d8de;border-radius:9px;max-height:230px;overflow-y:auto;box-shadow:0 8px 22px rgba(0,0,0,.14)}
+.catlijst div{padding:9px 11px;cursor:pointer;font-size:14px;border-bottom:1px solid #f2f2f4}
+.catlijst div:last-child{border-bottom:none}
+.catlijst div.actief,.catlijst div:hover{background:var(--grijs-bg)}
 .zoekbalk{display:flex;gap:6px;margin-bottom:10px;align-items:center}
 .zoekbalk input{font-size:15px;padding:10px 12px;background:var(--kaart)}
 .rij-datum{font-weight:600;color:var(--tekst);white-space:nowrap}
@@ -109,7 +114,7 @@ a{color:var(--blauw)}
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="uitleg" title="Uitleg over de app">❓ Uitleg</button>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v14-10 11:05</span>
+      <span class="klein" title="Versie van deze pagina">v14-10 11:35</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -919,7 +924,9 @@ var BEKENDE_NAMEN=[
   [/\bns\b.*(reizigers|groep|internation)|^ns\b|ns-?ticket/,'Trein NS','Reiskosten OV'],
   [/\bgvb\b|\bret\b rotterdam|\bhtm\b|arriva|\bconnexxion|translink|ov-?chip/,'Openbaar vervoer NL','Reiskosten OV'],
   [/\bsanef\b|\baprr\b|vinci autoroute|autoroutes|\basf\b|peage|péage|\bemovis|telepeage|bip&go/,'Tol (Frankrijk)','Autokosten'],
-  [/^dott\b|\bdott\b|\blime\b|^voi\b|\bvoi\b|\btier\b|\bbird\b|felyx|check technolog|go sharing/,'Deelstep/-scooter','Reis- en verblijfkosten'],
+  // 4e waarde = standaard btw-percentage (alleen als het altijd hetzelfde is). Dott: 0% btw (afspraak 14-10).
+  [/\bdott\b/,'Dott (deelstep)','Reis- en verblijfkosten',0],
+  [/\blime\b|^voi\b|\bvoi\b|\btier\b|\bbird\b|felyx|check technolog|go sharing/,'Deelstep/-scooter','Reis- en verblijfkosten'],
   [/\bbounce\b|nannybag|radical storage|lockers?\b/,'Bagage-opslag','Reis- en verblijfkosten'],
   [/\buber\b|\bbolt\b|free ?now|\bg7\b|\btaxi\b|heetch/,'Taxi','Reis- en verblijfkosten'],
   [/2theloo/,'Toilet (2theloo)','Reis- en verblijfkosten'],
@@ -942,20 +949,74 @@ var _aliasCache=null,_aliasVersie=-1;
 function eigenNamen(){
   if(_aliasCache&&_aliasVersie===versieTeller+':'+transacties.length) return _aliasCache;
   var m={};
-  transacties.forEach(function(t){if(t.alias){var k=naamSleutel(t.omschrijving);if(k) m[k]={naam:t.alias,cat:t.aliasCat||''};}});
+  transacties.forEach(function(t){if(t.alias){var k=naamSleutel(t.omschrijving);if(k) m[k]={naam:t.alias,cat:t.aliasCat||'',btw:(t.aliasBtw===0||t.aliasBtw)?+t.aliasBtw:null};}});
   _aliasCache=m;_aliasVersie=versieTeller+':'+transacties.length;return m;
 }
-// Geeft {naam, cat, bron:'eigen'|'app'} of null.
+// Geeft {naam, cat, btw (percentage of null), bron:'eigen'|'app'} of null.
 function herkend(t){
   if(!t||!t.omschrijving) return null;
   var e=eigenNamen()[naamSleutel(t.omschrijving)];
-  if(e) return {naam:e.naam,cat:e.cat,bron:'eigen'};
+  if(e) return {naam:e.naam,cat:e.cat,btw:e.btw,bron:'eigen'};
   var o=zonderAccenten(t.omschrijving.replace(BETAALDIENST_PREFIX,''));
   for(var i=0;i<BEKENDE_NAMEN.length;i++){
-    if(BEKENDE_NAMEN[i][0].test(o)) return {naam:BEKENDE_NAMEN[i][1],cat:BEKENDE_NAMEN[i][2],bron:'app'};
+    if(BEKENDE_NAMEN[i][0].test(o)) return {naam:BEKENDE_NAMEN[i][1],cat:BEKENDE_NAMEN[i][2],btw:BEKENDE_NAMEN[i].length>3?BEKENDE_NAMEN[i][3]:null,bron:'app'};
   }
   return null;
 }
+function btwUitPct(bedrag,pct){return Math.round((bedrag-bedrag/(1+pct/100))*100)/100;}
+
+// ---------- Onthouden wat je eerder koos ----------
+// Heb je bij een winkel één keer een rubriek en btw gekozen en de bon opgeslagen, dan vult de app
+// dat de volgende keer bij dezelfde winkel zelf in. De laatst opgeslagen bon telt.
+// Herkend aan de naam op de bon én aan de naam op de bank (als de bon aan een bankregel hangt).
+// Volgorde: eigen herkenbare naam (🏷) > eerder gekozen > lijst van de app (bijv. Dott).
+function btwPctVan(b){
+  if(!(b.bedrag>0)) return null;
+  var netto=b.bedrag-(b.btw||0);if(!(netto>0)) return null;
+  var p=(b.btw||0)/netto*100,best=null;
+  [0,9,21].forEach(function(s){if(Math.abs(p-s)<=1.2) best=s;});
+  return best;
+}
+var _geleerd=null,_geleerdVersie='';
+function geleerdeKeuzes(){
+  var v=versieTeller+':'+bonnen.length+':'+transacties.length;
+  if(_geleerd&&_geleerdVersie===v) return _geleerd;
+  var opNaam={},opWoord={};
+  function zet(k,b,x){
+    if(!k) return;
+    if(!opNaam[k]||opNaam[k].ts<=x.ts) opNaam[k]=x;
+    var w=k.split(' ')[0];
+    if(w.length>=4&&(!opWoord[w]||opWoord[w].ts<=x.ts)) opWoord[w]=x;
+  }
+  bonnen.forEach(function(b){
+    if(b.herhalend||!b.categorie) return;
+    var x={cat:b.categorie,btw:btwPctVan(b),ts:b.gewijzigd||b.id||0,naam:b.omschrijving||''};
+    zet(naamSleutel(b.omschrijving),b,x);
+    gekoppeldeTransacties(b.id).forEach(function(t){zet(naamSleutel(t.omschrijving),b,x);});
+  });
+  _geleerd={opNaam:opNaam,opWoord:opWoord};_geleerdVersie=v;
+  return _geleerd;
+}
+function geleerdVoor(tekst){
+  var k=naamSleutel(tekst);if(!k) return null;
+  var g=geleerdeKeuzes();
+  if(g.opNaam[k]) return g.opNaam[k];
+  var w=k.split(' ')[0];
+  return w.length>=4?g.opWoord[w]||null:null;
+}
+// Standaard rubriek en btw voor een nieuwe bon. bonTekst = naam op de bon, t = bankregel (mag leeg zijn).
+// Geeft {cat, btw (percentage of null), uitleg} of null.
+function standaardVoor(bonTekst,t){
+  var hkT=t?herkend(t):null,hkB=bonTekst?herkend({omschrijving:bonTekst}):null;
+  var eigen=(hkT&&hkT.bron==='eigen'&&(hkT.cat||hkT.btw!=null))?hkT:((hkB&&hkB.bron==='eigen'&&(hkB.cat||hkB.btw!=null))?hkB:null);
+  if(eigen) return {cat:eigen.cat,btw:eigen.btw,uitleg:'✓ Herkend als '+eigen.naam};
+  var g=(bonTekst&&geleerdVoor(bonTekst))||(t&&geleerdVoor(t.omschrijving));
+  if(g) return {cat:g.cat,btw:g.btw,uitleg:'✓ Zelfde als vorige keer'+(g.naam?' ('+g.naam+')':'')};
+  var app=(hkT&&(hkT.cat||hkT.btw!=null))?hkT:((hkB&&(hkB.cat||hkB.btw!=null))?hkB:null);
+  if(app) return {cat:app.cat,btw:app.btw,uitleg:'✓ Herkend als '+app.naam};
+  return null;
+}
+function standaardHint(s,cat){return s.uitleg+': '+(s.cat||cat)+(s.btw!=null?', '+s.btw+'% btw':'');}
 function zoekLink(t){
   var q=(t.omschrijving||'').replace(BETAALDIENST_PREFIX,'').split(' - ')[0].replace(/[0-9]{5,}/g,'').trim();
   return 'https://www.google.com/search?q='+encodeURIComponent(q);
@@ -967,17 +1028,19 @@ function vraagEigenNaam(t){
   toonModal('<div class="modal-box"><h3>Herkenbare naam</h3>'+
     '<p class="klein" style="margin-bottom:8px">Op de bank: <b>'+esc(t.omschrijving)+'</b><br>Geldt voor alle '+zelfde.length+' bankregel'+(zelfde.length!==1?'s':'')+' met deze naam, ook in latere afschriften.</p>'+
     '<div class="veld"><label>Wat is het eigenlijk?</label><input id="alias-naam" placeholder="bijv. Metro Parijs" value="'+esc(h?h.naam:'')+'"></div>'+
-    '<div class="veld"><label>Standaard categorie (optioneel)</label><select id="alias-cat"><option value="">— geen —</option>'+
-      CATEGORIEEN.map(function(c){return '<option'+(h&&h.cat===c?' selected':'')+'>'+esc(c)+'</option>';}).join('')+'</select></div>'+
+    '<div class="veld"><label>Standaard rubriek (optioneel)</label>'+catKiesHtml('alias-cat',h?h.cat:'',true)+'</div>'+
+    '<div class="veld"><label>Standaard btw (optioneel)</label><select id="alias-btw"><option value="">— zoals op de bon —</option>'+
+      [0,9,21].map(function(p){return '<option value="'+p+'"'+(h&&h.btw===p?' selected':'')+'>'+p+'%</option>';}).join('')+'</select></div>'+
     '<div class="balk" style="margin-top:14px"><button class="knop" data-act="alias-opslaan" data-tx="'+esc(t.id)+'">Opslaan</button>'+
     (h&&h.bron==='eigen'?'<button class="knopje" data-act="alias-weg" data-tx="'+esc(t.id)+'">Eigen naam wissen</button>':'')+
     '<button class="knop licht" data-act="modal-dicht">Annuleren</button></div></div>');
 }
-function zetEigenNaam(t,naam,cat){
+function zetEigenNaam(t,naam,cat,btw){
   var k=naamSleutel(t.omschrijving);
   transacties.forEach(function(x){
     if(naamSleutel(x.omschrijving)!==k) return;
-    if(naam){x.alias=naam;x.aliasCat=cat||'';} else {delete x.alias;delete x.aliasCat;}
+    if(naam){x.alias=naam;x.aliasCat=cat||'';if(btw===''||btw==null) delete x.aliasBtw; else x.aliasBtw=+btw;}
+    else {delete x.alias;delete x.aliasCat;delete x.aliasBtw;}
     stempel(x);
   });
   naWijziging(true,false);
@@ -1543,9 +1606,18 @@ function scanBestand(file,ctx){
       var bedrag=p.bedrag_incl||0,btw=p.btw_bedrag||0;
       var cijfers=p.rekening_cijfers?String(p.rekening_cijfers).replace(/[^0-9]/g,'').slice(-4):'';
       var her=bepaalBetaaldVia(cijfers,p.datum,bedrag);
+      var cat=CATEGORIEEN.indexOf(p.categorie)>=0?p.categorie:'Algemene kosten';
+      // Eerder gekozen of bekende naam (bijv. Dott)? Dan rubriek en btw zoals toen invullen.
+      var ctxTx=ctx&&ctx.txId?txMap[ctx.txId]:null;
+      var sv=standaardVoor(p.omschrijving||'',ctxTx),hint=her.hint;
+      if(sv){
+        if(sv.cat) cat=sv.cat;
+        if(sv.btw!=null) btw=btwUitPct(bedrag,sv.btw);
+        hint=(hint?hint+' · ':'')+standaardHint(sv,cat);
+      }
       toonBonForm({datum:p.datum||'',tijd:normaliseerTijd(p.tijd),omschrijving:p.omschrijving||'',bedrag:bedrag,btw:btw,
-        categorie:CATEGORIEEN.indexOf(p.categorie)>=0?p.categorie:'Algemene kosten',betaald:her.betaald,type:'Zakelijk',
-        opmerking:p.opmerking||'',bonCijfers:cijfers},her.hint,null);
+        categorie:cat,betaald:her.betaald,type:'Zakelijk',
+        opmerking:p.opmerking||'',bonCijfers:cijfers},hint,null);
     }).catch(function(e){
       toonBonForm({datum:'',bedrag:0,btw:0,categorie:'Algemene kosten',betaald:'BUNQ Zakelijk (7361)',type:'Zakelijk'},'',
         'De bon kon niet automatisch worden uitgelezen ('+e.message+'). Vul hem zelf in.');
@@ -1555,9 +1627,12 @@ function scanBestand(file,ctx){
 function bonVanTx(txId){
   var t=txMap[txId];if(!t) return;
   previewSrc=null;bonFormCtx={txId:txId};
-  var hk=herkend(t);
-  toonBonForm({datum:t.datum,omschrijving:hk?hk.naam+' ('+(t.omschrijving||'')+')':(t.omschrijving||''),bedrag:t.bedrag,btw:0,categorie:(hk&&hk.cat)||'Algemene kosten',
-    betaald:rekNaam(t)||'BUNQ Zakelijk (7361)',type:'Zakelijk',opmerking:'Gemaakt vanuit bankregel'},'',null);
+  var hk=herkend(t),sv=standaardVoor('',t);
+  var cat=(sv&&sv.cat)||'Algemene kosten';
+  toonBonForm({datum:t.datum,omschrijving:hk?hk.naam+' ('+(t.omschrijving||'')+')':(t.omschrijving||''),bedrag:t.bedrag,
+    btw:sv&&sv.btw!=null?btwUitPct(t.bedrag,sv.btw):0,categorie:cat,
+    betaald:rekNaam(t)||'BUNQ Zakelijk (7361)',type:'Zakelijk',opmerking:'Gemaakt vanuit bankregel'},
+    sv?standaardHint(sv,cat):'',null);
 }
 function bewerkBon(bonId){
   var b=bonMap[bonId];if(!b) return;
@@ -1596,7 +1671,7 @@ function toonBonForm(d,hint,fout){
     '<div class="twee"><div class="veld"><label>Bedrag incl. btw (€)</label><input id="bf-bedrag" inputmode="decimal" value="'+(d.bedrag?(+d.bedrag).toFixed(2):'')+'"></div>'+
     '<div class="veld"><label>Btw-bedrag (€)</label><input id="bf-btw" inputmode="decimal" value="'+(d.btw!=null?(+d.btw).toFixed(2):'0.00')+'"></div></div>'+
     '<div class="balk" style="margin-top:6px">'+[0,9,21].map(function(p){return '<button class="knopje" data-act="btw-pct" data-pct="'+p+'">'+p+'% btw</button>';}).join('')+'</div>'+
-    '<div class="veld"><label>Categorie</label><select id="bf-cat">'+opties(cats,cat)+'</select></div>'+
+    '<div class="veld"><label>Rubriek <span style="opacity:.7">(typ een letter om te zoeken)</span></label>'+catKiesHtml('bf-cat',cat,false)+'</div>'+
     '<div class="twee"><div class="veld"><label>Betaald via</label><select id="bf-betaald">'+opties(betaalOpties,d.betaald||'BUNQ Zakelijk (7361)')+'</select></div>'+
     '<div class="veld"><label>Zakelijk / privé</label><select id="bf-type">'+opties(['Zakelijk','Privé'],d.type||'Zakelijk')+'</select></div></div>'+
     (hint?'<div class="klein" style="margin-top:4px;color:var(--groen)">'+esc(hint)+'</div>':'')+
@@ -1609,6 +1684,7 @@ function toonBonForm(d,hint,fout){
 }
 function bonOpslaan(){
   var ctx=bonFormCtx||{};
+  normaliseerCat($('bf-cat'));
   var datum=$('bf-datum').value.trim();
   var nd=normaliseerDatum(datum);
   if(!nd){alert('Vul een geldige datum in (DD-MM-JJJJ).');return;}
@@ -1649,6 +1725,93 @@ function verwijderBon(bonId){
 function bekijkFoto(bonId){
   haalFoto(bonId).then(function(f){if(f) toonGroot(f); else alert('Bij deze bon is geen foto bewaard.');}).catch(function(){alert('Foto ophalen lukte niet.');});
 }
+
+// ---------- Rubriek kiezen door te typen ----------
+// Een tekstvak met een lijstje eronder. Typ een letter (bijv. "r") of een stukje ("verbl") en
+// je ziet alleen de rubrieken die passen. Kiezen met Enter, pijltjes of tikken.
+function catOpties(term){
+  var t=zonderAccenten(term).trim();
+  if(!t) return CATEGORIEEN.slice();
+  var start=[],woord=[],rest=[];
+  CATEGORIEEN.forEach(function(c){
+    var z=zonderAccenten(c);
+    if(z.indexOf(t)===0) start.push(c);
+    else if((' '+z.replace(/[^a-z0-9]+/g,' ')).indexOf(' '+t)>=0) woord.push(c);
+    else if(z.indexOf(t)>=0) rest.push(c);
+  });
+  return start.concat(woord,rest);
+}
+function catKiesHtml(id,gekozen,leegMag){
+  return '<div class="catkies"><input id="'+id+'" data-catkies="'+(leegMag?'leeg':'')+'" data-ok="'+esc(gekozen||'')+'" autocomplete="off" '+
+    'placeholder="'+(leegMag?'— geen — (typ een letter)':'Typ een letter, bijv. r')+'" value="'+esc(gekozen||'')+'"><div class="catlijst" id="'+id+'-lijst"></div></div>';
+}
+var catActief=0;
+function toonCatLijst(inp,term){
+  var l=$(inp.id+'-lijst');if(!l) return;
+  var opts=catOpties(term);l._opts=opts;
+  if(catActief>=opts.length) catActief=0;
+  var t=zonderAccenten(term).trim();
+  l.innerHTML=opts.length?opts.map(function(c,i){
+    var z=zonderAccenten(c),p=t?z.indexOf(t):-1;
+    var tekst=p>=0?esc(c.slice(0,p))+'<b>'+esc(c.slice(p,p+t.length))+'</b>'+esc(c.slice(p+t.length)):esc(c);
+    return '<div data-cat-optie="'+i+'" class="'+(i===catActief?'actief':'')+'">'+tekst+'</div>';
+  }).join(''):'<div class="klein" style="cursor:default">Geen rubriek gevonden</div>';
+  l.style.display='block';
+  var a=l.querySelector('.actief');if(a&&a.scrollIntoView) a.scrollIntoView({block:'nearest'});
+}
+function verbergCatLijst(inp){var l=$(inp.id+'-lijst');if(l) l.style.display='none';}
+function kiesCat(inp,c){inp.value=c;inp.setAttribute('data-ok',c);verbergCatLijst(inp);}
+// Getypt maar niet gekozen? Dan de eerste rubriek die past. Leeg = vorige (of "geen" waar dat mag).
+function normaliseerCat(inp){
+  if(!inp) return;
+  var v=inp.value.trim();
+  if(!v){if(inp.getAttribute('data-catkies')!=='leeg') inp.value=inp.getAttribute('data-ok')||'Algemene kosten';return;}
+  if(CATEGORIEEN.indexOf(v)>=0){inp.setAttribute('data-ok',v);return;}
+  if(v===inp.getAttribute('data-ok')) return; // eigen rubriek van een oudere bon: laten staan
+  var o=catOpties(v);
+  if(o.length){inp.value=o[0];inp.setAttribute('data-ok',o[0]);}
+  else inp.value=inp.getAttribute('data-ok')||'Algemene kosten';
+}
+document.addEventListener('focusin',function(e){
+  var inp=e.target;if(!inp.hasAttribute||!inp.hasAttribute('data-catkies')) return;
+  catActief=Math.max(0,CATEGORIEEN.indexOf(inp.value));
+  toonCatLijst(inp,'');
+  inp._vorig=inp.value;inp._vers=true; // de eerste letter begint een nieuwe zoekopdracht
+  try{inp.select();}catch(x){}
+  setTimeout(function(){if(inp._vers){try{inp.select();}catch(x){}}},0);
+});
+document.addEventListener('focusout',function(e){
+  var inp=e.target;if(!inp.hasAttribute||!inp.hasAttribute('data-catkies')) return;
+  normaliseerCat(inp);verbergCatLijst(inp);
+});
+document.addEventListener('input',function(e){
+  var inp=e.target;if(!inp.hasAttribute||!inp.hasAttribute('data-catkies')) return;
+  // Stond de oude rubriek er nog en werd de letter erachter gezet? Dan alleen het nieuw getypte gebruiken.
+  if(inp._vers&&inp._vorig&&inp.value.length>inp._vorig.length&&inp.value.indexOf(inp._vorig)===0) inp.value=inp.value.slice(inp._vorig.length);
+  inp._vers=false;
+  catActief=0;toonCatLijst(inp,inp.value);
+});
+document.addEventListener('keydown',function(e){
+  var inp=e.target;if(!inp.hasAttribute||!inp.hasAttribute('data-catkies')) return;
+  var l=$(inp.id+'-lijst'),open=l&&l.style.display==='block',opts=(l&&l._opts)||[];
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    if(!open){toonCatLijst(inp,'');return;}
+    catActief=(catActief+(e.key==='ArrowDown'?1:-1)+opts.length)%Math.max(1,opts.length);
+    toonCatLijst(inp,CATEGORIEEN.indexOf(inp.value)>=0?'':inp.value);
+  } else if(e.key==='Enter'){
+    e.preventDefault();
+    if(open&&opts.length) kiesCat(inp,opts[catActief]);
+  } else if(e.key==='Escape'&&open){
+    e.preventDefault();e.stopPropagation();verbergCatLijst(inp);
+  }
+},true);
+document.addEventListener('mousedown',function(e){
+  var o=e.target.closest&&e.target.closest('[data-cat-optie]');if(!o) return;
+  e.preventDefault(); // het vak blijft actief, zodat de keuze niet verloren gaat
+  var inp=o.closest('.catkies').querySelector('input'),l=$(inp.id+'-lijst');
+  kiesCat(inp,(l._opts||[])[+o.getAttribute('data-cat-optie')]);
+});
 
 // ---------- Modal ----------
 function toonModal(html){$('modal').innerHTML='<div class="modal" data-act="modal-achter">'+html+'</div>';}
@@ -1990,7 +2153,7 @@ function renderPaneel(t,paren){
   h+='<div class="klein" style="margin-top:8px">'+esc(t.datum)+' · '+esc(rekKortT(t))+(t.afschriftNaam?' · uit '+esc(t.afschriftNaam):'')+
     '</div>'+(kortOms(t.omschrijving)!==(t.omschrijving||'').replace(/"/g,'').replace(/\s+/g,' ').trim()?'<div class="klein" style="margin-top:4px;word-break:break-all">Volledig op de bank: '+esc(t.omschrijving)+'</div>':'');
   var hk=herkend(t);
-  h+='<div class="klein" style="margin-top:4px">'+(hk?'Herkend als <b>'+esc(hk.naam)+'</b>'+(hk.cat?' · '+esc(hk.cat):'')+(hk.bron==='app'?' (door de app)':'')+' · ':'')+
+  h+='<div class="klein" style="margin-top:4px">'+(hk?'Herkend als <b>'+esc(hk.naam)+'</b>'+(hk.cat?' · '+esc(hk.cat):'')+(hk.btw!=null?' · '+hk.btw+'% btw':'')+(hk.bron==='app'?' (door de app)':'')+' · ':'')+
     '<a href="#" data-act="alias"'+id+'>'+(hk?'✏️ andere naam':'🏷 geef herkenbare naam')+'</a> · '+
     '<a href="'+esc(zoekLink(t))+'" target="_blank" rel="noopener">🔎 opzoeken</a> · '+
     '<a href="#" data-act="vraag"'+id+'>'+(t.vraag?'✏️ vraag aanpassen':'❓ vraag stellen')+'</a></div>';
@@ -2621,10 +2784,10 @@ document.addEventListener('click',function(e){
       sluitModal();delete vw.vraag;delete vw.vraagDoor;delete vw.vraagOp;stempel(vw);
       zetMelding('✓ Vraag afgevinkt.','ok');naWijziging(!!t,!!b);break;
     case 'alias-opslaan':
-      if(t){var an=$('alias-naam').value.trim(),ac=$('alias-cat').value;sluitModal();zetEigenNaam(t,an,ac);
+      if(t){normaliseerCat($('alias-cat'));var an=$('alias-naam').value.trim(),ac=$('alias-cat').value.trim(),ab=$('alias-btw').value;sluitModal();zetEigenNaam(t,an,ac,ab);
         zetMelding(an?'✓ "'+t.omschrijving.split(' - ')[0]+'" heet nu "'+an+'" — bij alle regels met die naam.':'✓ Eigen naam gewist.','ok');render();}
       break;
-    case 'alias-weg': if(t){sluitModal();zetEigenNaam(t,'','');}break;
+    case 'alias-weg': if(t){sluitModal();zetEigenNaam(t,'','','');}break;
     case 'geen-match':
       if(t&&b){genegeerd[t.id]=genegeerd[t.id]||[];if(genegeerd[t.id].indexOf(b.id)<0) genegeerd[t.id].push(b.id);stempel(t);naWijziging(true,false);}break;
     case 'geen-overboeking':
