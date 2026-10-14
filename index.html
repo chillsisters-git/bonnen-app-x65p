@@ -49,6 +49,8 @@ input,select,textarea{font:inherit;font-size:14px;width:100%;padding:8px 9px;bor
 .rij.open{border-radius:10px 10px 0 0;margin-bottom:0}
 .rij.k-oranje{border-left-color:#f0a63a}.rij.k-groen{border-left-color:#1D9E75}.rij.k-blauw{border-left-color:#5b84e8}.rij.k-grijs{border-left-color:#c7c7cc}
 .rij-l{min-width:0;flex:1}
+.standaard-vink{display:flex;gap:9px;align-items:flex-start;margin-top:12px;padding:10px 12px;border-radius:10px;background:#fffaf0;border:1px solid #f0d9a8;cursor:pointer;font-size:13px}
+.standaard-vink input{margin-top:2px}
 .catkies{position:relative}
 .catlijst{display:none;position:absolute;left:0;right:0;top:100%;margin-top:3px;z-index:10;background:var(--kaart);border:1px solid #d8d8de;border-radius:9px;max-height:230px;overflow-y:auto;box-shadow:0 8px 22px rgba(0,0,0,.14)}
 .catlijst div{padding:9px 11px;cursor:pointer;font-size:14px;border-bottom:1px solid #f2f2f4}
@@ -114,7 +116,7 @@ a{color:var(--blauw)}
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="uitleg" title="Uitleg over de app">❓ Uitleg</button>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v14-10 11:35</span>
+      <span class="klein" title="Versie van deze pagina">v14-10 12:25</span>
       <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
     </div>
   </div>
@@ -981,32 +983,38 @@ var _geleerd=null,_geleerdVersie='';
 function geleerdeKeuzes(){
   var v=versieTeller+':'+bonnen.length+':'+transacties.length;
   if(_geleerd&&_geleerdVersie===v) return _geleerd;
-  var opNaam={},opWoord={};
-  function zet(k,b,x){
+  var opNaam={},opWoord={},stdNaam={},stdWoord={};
+  function zet(k,x,naamMap,woordMap){
     if(!k) return;
-    if(!opNaam[k]||opNaam[k].ts<=x.ts) opNaam[k]=x;
+    if(!naamMap[k]||naamMap[k].ts<=x.ts) naamMap[k]=x;
     var w=k.split(' ')[0];
-    if(w.length>=4&&(!opWoord[w]||opWoord[w].ts<=x.ts)) opWoord[w]=x;
+    if(w.length>=4&&(!woordMap[w]||woordMap[w].ts<=x.ts)) woordMap[w]=x;
   }
   bonnen.forEach(function(b){
     if(b.herhalend||!b.categorie) return;
     var x={cat:b.categorie,btw:btwPctVan(b),ts:b.gewijzigd||b.id||0,naam:b.omschrijving||''};
-    zet(naamSleutel(b.omschrijving),b,x);
-    gekoppeldeTransacties(b.id).forEach(function(t){zet(naamSleutel(t.omschrijving),b,x);});
+    var sleutels=[naamSleutel(b.omschrijving)].concat(gekoppeldeTransacties(b.id).map(function(t){return naamSleutel(t.omschrijving);}));
+    sleutels.forEach(function(k){
+      zet(k,x,opNaam,opWoord);
+      if(b.standaard) zet(k,x,stdNaam,stdWoord); // ⭐ bewust als standaard gekozen
+    });
   });
-  _geleerd={opNaam:opNaam,opWoord:opWoord};_geleerdVersie=v;
+  _geleerd={opNaam:opNaam,opWoord:opWoord,stdNaam:stdNaam,stdWoord:stdWoord};_geleerdVersie=v;
   return _geleerd;
 }
-function geleerdVoor(tekst){
+function geleerdVoor(tekst,alleenStandaard){
   var k=naamSleutel(tekst);if(!k) return null;
-  var g=geleerdeKeuzes();
-  if(g.opNaam[k]) return g.opNaam[k];
+  var g=geleerdeKeuzes(),nm=alleenStandaard?g.stdNaam:g.opNaam,wm=alleenStandaard?g.stdWoord:g.opWoord;
+  if(nm[k]) return nm[k];
   var w=k.split(' ')[0];
-  return w.length>=4?g.opWoord[w]||null:null;
+  return w.length>=4?wm[w]||null:null;
 }
 // Standaard rubriek en btw voor een nieuwe bon. bonTekst = naam op de bon, t = bankregel (mag leeg zijn).
 // Geeft {cat, btw (percentage of null), uitleg} of null.
 function standaardVoor(bonTekst,t){
+  // 1. Wat je zelf met ⭐ als standaard hebt gezet, gaat altijd voor.
+  var std=(bonTekst&&geleerdVoor(bonTekst,true))||(t&&geleerdVoor(t.omschrijving,true));
+  if(std) return {cat:std.cat,btw:std.btw,uitleg:'⭐ Jouw standaard'+(std.naam?' ('+std.naam+')':''),standaard:true};
   var hkT=t?herkend(t):null,hkB=bonTekst?herkend({omschrijving:bonTekst}):null;
   var eigen=(hkT&&hkT.bron==='eigen'&&(hkT.cat||hkT.btw!=null))?hkT:((hkB&&hkB.bron==='eigen'&&(hkB.cat||hkB.btw!=null))?hkB:null);
   if(eigen) return {cat:eigen.cat,btw:eigen.btw,uitleg:'✓ Herkend als '+eigen.naam};
@@ -1674,8 +1682,10 @@ function toonBonForm(d,hint,fout){
     '<div class="veld"><label>Rubriek <span style="opacity:.7">(typ een letter om te zoeken)</span></label>'+catKiesHtml('bf-cat',cat,false)+'</div>'+
     '<div class="twee"><div class="veld"><label>Betaald via</label><select id="bf-betaald">'+opties(betaalOpties,d.betaald||'BUNQ Zakelijk (7361)')+'</select></div>'+
     '<div class="veld"><label>Zakelijk / privé</label><select id="bf-type">'+opties(['Zakelijk','Privé'],d.type||'Zakelijk')+'</select></div></div>'+
-    (hint?'<div class="klein" style="margin-top:4px;color:var(--groen)">'+esc(hint)+'</div>':'')+
+    '<div class="klein" id="bf-hint" style="margin-top:4px;color:var(--groen)">'+esc(hint||'')+'</div>'+
     '<div class="veld"><label>Opmerking</label><input id="bf-opm" value="'+esc(d.opmerking||'')+'"></div>'+
+    '<label class="standaard-vink"><input type="checkbox" id="bf-standaard" style="width:auto"'+(d.standaard?' checked':'')+'>'+
+      '<span>⭐ <b>Maak dit de standaard</b> voor deze winkel<br><span class="klein">De volgende bon met dezelfde naam krijgt meteen deze rubriek en btw.</span></span></label>'+
     '<input type="hidden" id="bf-cijfers" value="'+esc(d.bonCijfers||'')+'">'+
     '<div class="balk" style="margin-top:14px"><button class="knop" data-act="bon-opslaan">✓ Opslaan'+(t?' en koppelen':'')+'</button>'+
     '<button class="knop licht" data-act="modal-dicht">Annuleren</button></div>'+
@@ -1703,12 +1713,20 @@ function bonOpslaan(){
     b.toegevoegdDoor=gebruiker;
     bonnen.unshift(b);bonMap[b.id]=b;
   }
+  // ⭐ Standaard: alleen deze bon is de standaard voor deze winkel.
+  var wordtStd=$('bf-standaard')&&$('bf-standaard').checked;
+  if(wordtStd){
+    var ks=naamSleutel(b.omschrijving);
+    bonnen.forEach(function(x){if(x!==b&&x.standaard&&naamSleutel(x.omschrijving)===ks){delete x.standaard;stempel(x);}});
+    b.standaard=true;
+  } else if(b.standaard) delete b.standaard;
   stempel(b);
   if(previewSrc&&(!ctx.bonId||!b.heeftFoto)){b.heeftFoto=true;bewaarFoto(b.id,previewSrc).catch(function(){zetMelding('⚠️ De foto van de bon kon niet bewaard worden.','fout');render();});}
   var t=ctx.txId?txMap[ctx.txId]:null;
   if(t) koppel(t,b);
   sluitModal();
-  zetMelding(t?'✓ Bon bewaard en gekoppeld.':(ctx.bonId?'✓ Bon bijgewerkt.':'✓ Bon bewaard in het bonnenbakje.'),'ok');
+  zetMelding((t?'✓ Bon bewaard en gekoppeld.':(ctx.bonId?'✓ Bon bijgewerkt.':'✓ Bon bewaard in het bonnenbakje.'))+
+    (wordtStd?' ⭐ "'+(b.omschrijving||'')+'" is nu de standaard: '+(b.categorie||'')+(btwPctVan(b)!=null?', '+btwPctVan(b)+'% btw':'')+'.':''),'ok');
   naWijziging(!!t,true);
 }
 function verwijderBon(bonId){
@@ -1724,6 +1742,80 @@ function verwijderBon(bonId){
 }
 function bekijkFoto(bonId){
   haalFoto(bonId).then(function(f){if(f) toonGroot(f); else alert('Bij deze bon is geen foto bewaard.');}).catch(function(){alert('Foto ophalen lukte niet.');});
+}
+
+// ---------- Screenshot van een bon (uit de oude app) ----------
+// Kies een ander tabblad of venster (bijv. je mail met de factuur). De app maakt er één foto van,
+// jij trekt een kader om de bon, en die wordt uitgelezen als elke andere bon.
+// Werkt in Chrome, Edge en Safari op de computer; op een telefoon is de knop verborgen.
+function kanScherm(){
+  return !!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia)&&!/iPhone|iPad|Android/i.test(navigator.userAgent);
+}
+function maakSchermafbeelding(ctx){
+  if(!kanScherm()){alert('Dit werkt alleen op de computer. Gebruik anders Cmd + Ctrl + Shift + 4 en plak met Cmd + V.');return;}
+  navigator.mediaDevices.getDisplayMedia({video:true,audio:false,selfBrowserSurface:'exclude',preferCurrentTab:false})
+  .then(function(stream){
+    var video=document.createElement('video');
+    video.srcObject=stream;video.muted=true;video.playsInline=true;
+    return video.play().then(function(){
+      return new Promise(function(res){setTimeout(res,400);}); // even wachten tot het beeld scherp is
+    }).then(function(){
+      var c=document.createElement('canvas');
+      c.width=video.videoWidth;c.height=video.videoHeight;
+      c.getContext('2d').drawImage(video,0,0);
+      stream.getTracks().forEach(function(t){t.stop();});
+      toonUitsnijden(c,ctx);
+    });
+  }).catch(function(e){
+    if(e&&e.name==='NotAllowedError') return; // gewoon geannuleerd
+    alert('Een screenshot maken lukte niet ('+(e&&e.message||e)+'). Op de Mac moet de browser soms toestemming krijgen: Systeeminstellingen → Privacy en beveiliging → Schermopname.');
+  });
+}
+function toonUitsnijden(canvas,ctx){
+  var oud=$('knip-overlay');if(oud) oud.remove();
+  var ov=document.createElement('div');
+  ov.id='knip-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;gap:10px';
+  ov.innerHTML='<div style="color:#fff;font-size:15px;text-align:center">Trek een kader om de bon</div>'+
+    '<div id="knip-vak" style="position:relative;line-height:0;user-select:none;touch-action:none;cursor:crosshair">'+
+      '<img id="knip-img" draggable="false" style="max-width:94vw;max-height:76vh;display:block">'+
+      '<div id="knip-kader" style="position:absolute;border:2px solid #1D9E75;background:rgba(29,158,117,.15);display:none;pointer-events:none"></div>'+
+    '</div>'+
+    '<div class="balk" style="justify-content:center;margin:0">'+
+      '<button class="knop" id="knip-ok" disabled>✓ Gebruik selectie</button>'+
+      '<button class="knop licht" id="knip-alles">Hele afbeelding</button>'+
+      '<button class="knop licht" id="knip-weg">Annuleren</button>'+
+    '</div>';
+  document.body.appendChild(ov);
+  var img=$('knip-img');
+  img.src=canvas.toDataURL('image/png');
+  var vak=$('knip-vak'),kader=$('knip-kader'),okBtn=$('knip-ok');
+  var start=null,sel=null;
+  function pos(e){var r=img.getBoundingClientRect();return {x:Math.max(0,Math.min(r.width,e.clientX-r.left)),y:Math.max(0,Math.min(r.height,e.clientY-r.top))};}
+  vak.addEventListener('pointerdown',function(e){start=pos(e);sel=null;vak.setPointerCapture(e.pointerId);kader.style.display='none';okBtn.disabled=true;});
+  vak.addEventListener('pointermove',function(e){
+    if(!start) return;
+    var p=pos(e);
+    sel={x:Math.min(start.x,p.x),y:Math.min(start.y,p.y),w:Math.abs(p.x-start.x),h:Math.abs(p.y-start.y)};
+    kader.style.display='block';kader.style.left=sel.x+'px';kader.style.top=sel.y+'px';kader.style.width=sel.w+'px';kader.style.height=sel.h+'px';
+  });
+  vak.addEventListener('pointerup',function(){start=null;okBtn.disabled=!(sel&&sel.w>10&&sel.h>10);});
+  function gebruik(c){
+    c.toBlob(function(blob){
+      ov.remove();
+      scanBestand(new File([blob],'screenshot.png',{type:'image/png'}),ctx||{});
+    },'image/png');
+  }
+  okBtn.onclick=function(){
+    if(!sel) return;
+    var schaal=canvas.width/img.clientWidth;
+    var c=document.createElement('canvas');
+    c.width=Math.round(sel.w*schaal);c.height=Math.round(sel.h*schaal);
+    c.getContext('2d').drawImage(canvas,sel.x*schaal,sel.y*schaal,sel.w*schaal,sel.h*schaal,0,0,c.width,c.height);
+    gebruik(c);
+  };
+  $('knip-alles').onclick=function(){gebruik(canvas);};
+  $('knip-weg').onclick=function(){ov.remove();};
 }
 
 // ---------- Rubriek kiezen door te typen ----------
@@ -2190,7 +2282,7 @@ function renderPaneel(t,paren){
     if(vs.length||partner){h+='<h4>Voorstellen</h4>';vs.forEach(function(v){h+=voorstelHtml(t,v);});if(partner) h+=overboekingHtml(t,partner);}
     h+='<h4>Bon zoeken</h4><input placeholder="🔍 Zoek op winkel, bedrag of datum…" data-zoek="bon"'+id+'><div class="zoekres" data-zoekres="'+esc(t.id)+'"></div>';
     h+='<h4>Of</h4><div class="acties">'+
-      knop('bon-upload','📷 Bon uploaden',id)+knop('bon-maken','➕ Bon maken van deze regel',id)+
+      knop('bon-upload','📷 Bon uploaden',id)+(kanScherm()?knop('bon-scherm','🖥 Screenshot',id):'')+knop('bon-maken','➕ Bon maken van deze regel',id)+
       knop('geenbon-kies','Geen bon nodig',id)+knop('status','Privé',id+' data-code="prive"')+
       (s==='opvragen'?knop('reset','Niet meer opvragen',id):knop('status','📤 Bon opvragen',id+' data-code="opvragen"'))+
       (isPriveRek(t)&&t.zakelijk?knop('niet-zakelijk','Toch privé',id):'')+
@@ -2330,8 +2422,10 @@ function naarBakjeMaand(){
 }
 function renderBakje(){
   var h='<div class="balk" style="margin-bottom:10px"><button class="knop" data-act="bon-nieuw" data-camera="1">📷 Foto maken</button>'+
-    '<button class="knop licht" data-act="bon-nieuw">↑ Bestand kiezen</button></div>'+
-    '<div class="dropzone" id="dropzone">Sleep een bon hierheen, of plak een schermafbeelding met Cmd + V</div>';
+    '<button class="knop licht" data-act="bon-nieuw">↑ Bestand kiezen</button>'+
+    (kanScherm()?'<button class="knop licht" data-act="bon-scherm">🖥 Screenshot maken</button>':'')+'</div>'+
+    '<div class="dropzone" id="dropzone">Sleep een bon hierheen, of plak een schermafbeelding met Cmd + V'+
+    '<div style="margin-top:4px;font-size:12px">Tip: <b>Cmd + Ctrl + Shift + 4</b>, trek een kader om de bon en druk hier op <b>Cmd + V</b>.</div></div>';
   h+='<div class="zoekbalk"><input type="search" id="bon-zoek" autocomplete="off" placeholder="🔍 Zoek een bon op naam, bedrag of datum (alle maanden)" value="'+esc(zoekBon)+'">'+
     (zoekBon?'<button class="knopje" data-act="zoek-bon-wis">✕ Wissen</button>':'')+'</div>';
   if(zoekBon.trim()) return h+renderBonZoekResultaten();
@@ -2746,6 +2840,7 @@ document.addEventListener('click',function(e){
       if(t){var nw=prompt('Omschrijving van deze bankregel:',t.omschrijving||'');if(nw!==null){t.omschrijving=nw.trim();stempel(t);naWijziging(true,false);}}break;
     case 'bon-upload': startBonUpload(t?t.id:null,false);break;
     case 'bon-nieuw': startBonUpload(null,!!el.getAttribute('data-camera'));break;
+    case 'bon-scherm': maakSchermafbeelding({txId:t?t.id:null});break;
     case 'bon-maken': if(t) bonVanTx(t.id);break;
     case 'bon-bewerk': if(b) bewerkBon(b.id);break;
     case 'bon-weg': if(b) verwijderBon(b.id);break;
@@ -2815,6 +2910,16 @@ document.addEventListener('input',function(e){
   }
   if(e.target.hasAttribute('data-zoek')) vulZoekresultaten(e.target);
 });
+// Naam van de winkel getypt of aangepast in een nieuwe bon? Dan meteen de standaard (of vorige keuze) invullen.
+document.addEventListener('change',function(e){
+  if(e.target.id!=='bf-oms') return;
+  var ctx=bonFormCtx||{};if(ctx.bonId) return; // bij bewerken niets overschrijven
+  var sv=standaardVoor(e.target.value,ctx.txId?txMap[ctx.txId]:null);if(!sv) return;
+  var ci=$('bf-cat');
+  if(sv.cat&&ci){ci.value=sv.cat;ci.setAttribute('data-ok',sv.cat);}
+  if(sv.btw!=null) $('bf-btw').value=btwUitPct(parseAmt($('bf-bedrag').value),sv.btw).toFixed(2);
+  var hi=$('bf-hint');if(hi) hi.textContent=standaardHint(sv,sv.cat||(ci&&ci.value));
+});
 document.addEventListener('focusout',function(e){
   var el=e.target;
   if(el.getAttribute&&el.getAttribute('data-act-blur')==='notitie'){
@@ -2843,7 +2948,7 @@ document.addEventListener('drop',function(e){
   var f=e.dataTransfer.files[0];if(f) scanBestand(f,{});
 });
 document.addEventListener('keydown',function(e){
-  if(e.key==='Escape'){var o=$('groot-overlay');if(o) o.remove();else if(uitlegOpen) sluitUitleg();else if($('modal').innerHTML) sluitModal();}
+  if(e.key==='Escape'){var o=$('groot-overlay')||$('knip-overlay');if(o) o.remove();else if(uitlegOpen) sluitUitleg();else if($('modal').innerHTML) sluitModal();}
 });
 
 // ---------- Start ----------
