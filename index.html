@@ -117,8 +117,7 @@ a{color:var(--blauw)}
       <span class="klein" id="sync"></span>
       <button class="chip-naam" data-act="uitleg" title="Uitleg over de app">❓ Uitleg</button>
       <button class="chip-naam" data-act="naam" id="naam-chip">👤 …</button>
-      <span class="klein" title="Versie van deze pagina">v14-10 12:45</span>
-      <a class="link-oud" href="index.html" title="De vorige versie van de app">Oude app ↗</a>
+      <span class="klein" title="Versie van deze pagina">v18-10 19:05</span>
     </div>
   </div>
   <div class="tabs" id="tabs"></div>
@@ -2529,12 +2528,27 @@ function opvraagTekst(){
   var groepen={};
   var top=[];
   if(vragen.length){
-    top.push('Vragen ('+vragen.length+')','');
-    vragen.forEach(function(v){top.push('• '+v.datum+' · '+(v.oms||'—')+' · '+fmt(v.bedrag)+' · '+v.wat,'  '+v.x.vraag.replace(/\n/g,'\n  '));});
-    top.push('');
+    top.push('VRAGEN ('+vragen.length+')','');
+    if(opvSort==='bedrijf'){
+      // Per bedrijf op alfabet, binnen een bedrijf op datum.
+      var vg={};
+      vragen.forEach(function(v){
+        var naam=v.soort==='tx'?bedrijfVan(v.x):((v.oms||'—').trim()),k=naam.toLowerCase();
+        (vg[k]=vg[k]||{naam:naam,items:[]}).items.push(v);
+      });
+      Object.keys(vg).map(function(k){return vg[k];}).sort(function(a,b){return a.naam.localeCompare(b.naam,'nl',{sensitivity:'base'});})
+        .forEach(function(gr){
+          top.push(gr.naam+':');
+          gr.items.forEach(function(v){top.push('• '+v.datum+' · '+fmt(v.bedrag)+' · '+v.wat,'  ❓ '+v.x.vraag.replace(/\n/g,'\n  '));});
+          top.push('');
+        });
+    } else {
+      vragen.forEach(function(v){top.push('• '+v.datum+' · '+(v.oms||'—')+' · '+fmt(v.bedrag)+' · '+v.wat,'  '+v.x.vraag.replace(/\n/g,'\n  '));});
+      top.push('');
+    }
   }
   if(!lijst.length) return top.join('\n').trim();
-  var regels=top.concat(['Bonnen die ik nog mis','('+lijst.length+' stuk'+(lijst.length!==1?'s':'')+', samen '+fmt(lijst.reduce(function(s,t){return s+t.bedrag;},0))+')','']);
+  var regels=top.concat(['BONNEN DIE IK NOG MIS','('+lijst.length+' stuk'+(lijst.length!==1?'s':'')+', samen '+fmt(lijst.reduce(function(s,t){return s+t.bedrag;},0))+')','']);
   if(opvSort==='bedrijf'){
     perBedrijf(lijst).forEach(function(gr){
       regels.push(gr.naam+(gr.items.length>1?' ('+gr.items.length+'x)':'')+':');
@@ -3009,5 +3023,6 @@ laadAlles(true).then(function(){
 });
 
 </script>
+<script src="verzamelbon.js"></script>
 </body>
 </html>
